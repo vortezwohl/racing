@@ -85,10 +85,21 @@ interface VehicleData {
     length: number;
 }
 
+interface MenuLayout {
+    vehicleSpacing: number;
+    cameraZoom: number;
+    titleScale: number;
+    titleY: number;
+    titleX: number;
+    titleLetterSpacing: number;
+    titlePulseAmplitude: number;
+}
+
 export {
     Controls,
     CurveData,
     LayerData,
+    MenuLayout,
     Platform,
     CheckpointData,
     Checkpoint,
