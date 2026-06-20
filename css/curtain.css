@@ -14,7 +14,7 @@
 }
 
 .long-fade-to-black {
-    animation: fade-to-black 3s ease-in forwards;
+    animation: fade-to-black 0.58s ease-out forwards;
 }
 
 @keyframes fade-to-black {

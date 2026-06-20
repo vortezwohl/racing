@@ -798,7 +798,7 @@ export default class GameScene extends THREE.Scene {
 
                 this.ui.finishTime.innerHTML = 
                     `Time: ${this.track.getTimeString()}`;
-            }, 3200);
+            }, 650);
 
             this.finished = true;
         }
