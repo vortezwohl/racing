@@ -119,6 +119,7 @@ interface RaceUi {
     finishTime: HTMLElement;
     joystick: HTMLElement;
     knob: HTMLElement;
+    markerHost: HTMLElement;
     timer: HTMLElement;
 }
 

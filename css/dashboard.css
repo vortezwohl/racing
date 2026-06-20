@@ -24,3 +24,43 @@
     top: 5vh;
     right: 5vw;
 }
+
+#marker-layer {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+}
+
+.race-marker {
+    position: absolute;
+    top: 0;
+    left: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    transform: translate(-50%, -100%);
+    opacity: 0;
+    will-change: transform, opacity;
+}
+
+.race-marker__label {
+    color: var(--marker-color, #8be9ff);
+    font-family: "Segoe UI", "Trebuchet MS", "Verdana", sans-serif;
+    font-size: 16px;
+    font-weight: 400;
+    letter-spacing: 0.08em;
+    line-height: 1;
+    white-space: nowrap;
+    text-shadow: 0 0 3px rgba(4, 18, 36, 0.72);
+}
+
+.race-marker__pointer {
+    width: 0;
+    height: 0;
+    border-left: 7px solid transparent;
+    border-right: 7px solid transparent;
+    border-top: 13px solid var(--marker-color, #8be9ff);
+    filter: drop-shadow(0 0 4px rgba(4, 18, 36, 0.82));
+}

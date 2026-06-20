@@ -60,23 +60,27 @@ type RaceDebugState = {
     laps: number;
 };
 
-type TrailLayerState = {
-    geometry: THREE.BufferGeometry;
-    material: THREE.MeshBasicMaterial;
-    mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
+type RaceMarkerElements = {
+    label: HTMLDivElement;
+    pointer: HTMLDivElement;
+    root: HTMLDivElement;
+};
+
+type TrailClusterSet = {
+    halo: THREE.Sprite;
+    primary: THREE.Sprite;
+    secondary: Array<THREE.Sprite>;
+    spark: THREE.Sprite;
 };
 
 type RaceVehicleState = {
     displayName: string;
     effectiveTrailPositions: Array<THREE.Vector3>;
-    glowSprites: Array<THREE.Sprite>;
+    trailClusters: Array<TrailClusterSet>;
     id: string;
     identityColor: number;
     isLocalPlayer: boolean;
-    markerGroup?: THREE.Group;
-    trailCore: TrailLayerState;
-    trailFin: TrailLayerState;
-    trailShell: TrailLayerState;
+    markerElements?: RaceMarkerElements;
     trailPositions: Array<THREE.Vector3>;
     vehicle: Vehicle;
     wobblePhase: number;
@@ -753,92 +757,8 @@ export default class GameScene extends THREE.Scene {
         return `rgb(${red}, ${green}, ${blue})`;
     }
 
-    createRaceNameSprite(text: string, color: number): THREE.Sprite {
-        let canvas = document.createElement("canvas");
-        let context = canvas.getContext("2d");
-        if (!context)
-            throw new Error("Unable to create race name canvas.");
-
-        canvas.width = 512;
-        canvas.height = 128;
-        context.clearRect(0, 0, canvas.width, canvas.height);
-        context.textAlign = "center";
-        context.textBaseline = "middle";
-        context.font = '800 48px "RaceName", "Trebuchet MS", "Verdana", sans-serif';
-        context.shadowBlur = 8;
-        context.shadowColor = this.colorToCss(color);
-        context.lineWidth = 8;
-        context.strokeStyle = "rgba(0, 8, 22, 0.86)";
-        context.fillStyle = this.colorToCss(color);
-        context.strokeText(text, canvas.width / 2, canvas.height / 2);
-        context.fillText(text, canvas.width / 2, canvas.height / 2);
-
-        let texture = new THREE.CanvasTexture(canvas);
-        texture.needsUpdate = true;
-        let material = new THREE.SpriteMaterial({
-            map: texture,
-            transparent: true,
-            depthTest: false,
-            depthWrite: false,
-        });
-        let sprite = new THREE.Sprite(material);
-        sprite.scale.set(2.7, 0.72, 1);
-        sprite.name = "race-name";
-        sprite.renderOrder = 40;
-        return sprite;
-    }
-
-    createPointerSprite(color: number): THREE.Sprite {
-        let canvas = document.createElement("canvas");
-        let context = canvas.getContext("2d");
-        if (!context)
-            throw new Error("Unable to create race pointer canvas.");
-
-        canvas.width = 128;
-        canvas.height = 128;
-        context.clearRect(0, 0, canvas.width, canvas.height);
-        context.beginPath();
-        context.moveTo(64, 108);
-        context.lineTo(20, 24);
-        context.lineTo(108, 24);
-        context.closePath();
-        context.shadowBlur = 8;
-        context.shadowColor = this.colorToCss(color);
-        context.fillStyle = this.colorToCss(color);
-        context.fill();
-
-        let texture = new THREE.CanvasTexture(canvas);
-        let material = new THREE.SpriteMaterial({
-            map: texture,
-            transparent: true,
-            depthTest: false,
-            depthWrite: false,
-        });
-        let sprite = new THREE.Sprite(material);
-        sprite.scale.set(0.55, 0.55, 1);
-        sprite.position.y = -0.58;
-        sprite.name = "race-pointer";
-        sprite.renderOrder = 41;
-        return sprite;
-    }
-
-    createIdentityMarker(displayName: string, color: number): THREE.Group {
-        let marker = new THREE.Group();
-        marker.name = "race-identity-marker";
-        marker.add(this.createRaceNameSprite(displayName, color));
-        marker.add(this.createPointerSprite(color));
-        marker.renderOrder = 40;
-        this.add(marker);
-        return marker;
-    }
-
     clearRaceIdentityMarkers() {
-        let staleMarkers = this.children.filter(child =>
-            child instanceof THREE.Group &&
-            child.name === "race-identity-marker",
-        );
-        for (let marker of staleMarkers)
-            this.remove(marker);
+        this.ui.markerHost.innerHTML = "";
     }
 
     createTrailGlowTexture(): THREE.CanvasTexture {
@@ -847,115 +767,146 @@ export default class GameScene extends THREE.Scene {
         if (!context)
             throw new Error("Unable to create trail glow texture.");
 
-        canvas.width = 128;
-        canvas.height = 128;
-        let gradient = context.createRadialGradient(64, 64, 0, 64, 64, 64);
-        gradient.addColorStop(0, "rgba(255, 255, 255, 0.45)");
-        gradient.addColorStop(0.2, "rgba(255, 255, 255, 0.28)");
-        gradient.addColorStop(0.58, "rgba(255, 255, 255, 0.08)");
-        gradient.addColorStop(1, "rgba(255, 255, 255, 0)");
-        context.fillStyle = gradient;
-        context.beginPath();
-        context.arc(64, 64, 64, 0, Math.PI * 2);
-        context.fill();
+        canvas.width = 160;
+        canvas.height = 160;
+
+        const paintSoftBlob = (
+            centerX: number,
+            centerY: number,
+            radiusX: number,
+            radiusY: number,
+            rotation: number,
+            alpha: number,
+        ) => {
+            context.save();
+            context.translate(centerX, centerY);
+            context.rotate(rotation);
+            context.scale(radiusX / radiusY, 1);
+            let gradient = context.createRadialGradient(0, 0, radiusY * 0.18, 0, 0, radiusY);
+            gradient.addColorStop(0, `rgba(255, 255, 255, ${alpha * 0.34})`);
+            gradient.addColorStop(0.32, `rgba(255, 255, 255, ${alpha * 0.18})`);
+            gradient.addColorStop(0.72, `rgba(255, 255, 255, ${alpha * 0.09})`);
+            gradient.addColorStop(1, "rgba(255, 255, 255, 0)");
+            context.fillStyle = gradient;
+            context.beginPath();
+            context.arc(0, 0, radiusY, 0, Math.PI * 2);
+            context.fill();
+            context.restore();
+        };
+
+        paintSoftBlob(80, 80, 56, 40, 0.22, 0.78);
+        paintSoftBlob(58, 74, 34, 26, -0.52, 0.52);
+        paintSoftBlob(104, 88, 30, 22, 0.46, 0.46);
+        paintSoftBlob(78, 104, 26, 18, -0.16, 0.32);
+
+        context.save();
+        context.globalCompositeOperation = "screen";
+        for (let i = 0; i < 5; i++) {
+            let sparkleX = 42 + Math.random() * 76;
+            let sparkleY = 44 + Math.random() * 72;
+            let sparkleRadius = 7 + Math.random() * 7;
+            let sparkle = context.createRadialGradient(
+                sparkleX,
+                sparkleY,
+                0,
+                sparkleX,
+                sparkleY,
+                sparkleRadius,
+            );
+            sparkle.addColorStop(0, "rgba(255, 255, 255, 0.12)");
+            sparkle.addColorStop(0.48, "rgba(255, 255, 255, 0.05)");
+            sparkle.addColorStop(1, "rgba(255, 255, 255, 0)");
+            context.fillStyle = sparkle;
+            context.beginPath();
+            context.arc(sparkleX, sparkleY, sparkleRadius, 0, Math.PI * 2);
+            context.fill();
+        }
+        context.restore();
 
         let texture = new THREE.CanvasTexture(canvas);
         texture.needsUpdate = true;
         return texture;
     }
 
-    createTrailLayer(
-        color: THREE.ColorRepresentation,
-        opacity: number,
-        renderOrder: number,
-    ): TrailLayerState {
-        let geometry = new THREE.BufferGeometry();
-        let positions = new Float32Array(raceTrail.sampleCount * 2 * 3);
-        geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-        let indices: Array<number> = [];
-        for (let i = 0; i < raceTrail.sampleCount - 1; i++) {
-            let base = i * 2;
-            indices.push(base, base + 1, base + 2);
-            indices.push(base + 1, base + 3, base + 2);
-        }
-        geometry.setIndex(indices);
-        geometry.setDrawRange(0, 0);
+    createRaceMarker(displayName: string, color: number): RaceMarkerElements {
+        let marker = document.createElement("div");
+        marker.className = "race-marker";
+        let cssColor = this.colorToCss(color);
+        marker.style.setProperty("--marker-color", cssColor);
 
-        let material = new THREE.MeshBasicMaterial({
-            blending: renderOrder >= 21 ? THREE.AdditiveBlending : THREE.NormalBlending,
-            color,
-            side: THREE.DoubleSide,
-            depthWrite: false,
-            opacity,
-            transparent: true,
-        });
-        let mesh = new THREE.Mesh(geometry, material);
-        mesh.renderOrder = renderOrder;
-        this.add(mesh);
+        let label = document.createElement("div");
+        label.className = "race-marker__label";
+        label.textContent = displayName;
+        label.style.color = cssColor;
+        label.style.fontSize = `clamp(${raceTrail.markerFontMinPx}px, ${raceTrail.markerFontScaleVw}vw, ${raceTrail.markerFontSizePx}px)`;
+
+        let pointer = document.createElement("div");
+        pointer.className = "race-marker__pointer";
+        pointer.style.borderTopColor = cssColor;
+        pointer.style.borderLeftWidth = `${raceTrail.markerPointerWidthPx}px`;
+        pointer.style.borderRightWidth = `${raceTrail.markerPointerWidthPx}px`;
+        pointer.style.borderTopWidth = `${raceTrail.markerPointerHeightPx}px`;
+
+        marker.append(label, pointer);
+        this.ui.markerHost.appendChild(marker);
+
         return {
-            geometry,
-            material,
-            mesh,
+            label,
+            pointer,
+            root: marker,
         };
     }
 
     createFluidTrailState(color: number): Pick<
         RaceVehicleState,
-        "glowSprites" | "trailCore" | "trailFin" | "trailShell" | "wobblePhase"
+        "trailClusters" | "wobblePhase"
     > {
-        let baseColor = new THREE.Color(color);
-        let shellColor = baseColor.clone().multiplyScalar(0.82);
-        let finColor = baseColor.clone().lerp(new THREE.Color(0xffffff), 0.08);
-        let coreColor = baseColor.clone().lerp(new THREE.Color(0xffffff), 0.1);
-        let trailShell = this.createTrailLayer(shellColor, raceTrail.opacity * 0.95, 20);
-        let trailFin = this.createTrailLayer(finColor, raceTrail.opacity * 0.38, 19);
-        let trailCore = this.createTrailLayer(coreColor, raceTrail.opacity * 0.22, 21);
-
         let glowTexture = this.createTrailGlowTexture();
-        let glowSprites = Array(raceTrail.sampleCount).fill(0).map(() => {
+        let createSprite = (
+            opacity: number,
+            scale: number,
+            renderOrder: number,
+            colorOffset: number = 0,
+        ) => {
             let sprite = new THREE.Sprite(new THREE.SpriteMaterial({
                 map: glowTexture,
-                color,
+                color: new THREE.Color(color).lerp(new THREE.Color(0xffffff), colorOffset),
                 transparent: true,
-                opacity: raceTrail.glowOpacity,
-                blending: THREE.AdditiveBlending,
+                opacity,
+                blending: THREE.NormalBlending,
                 depthWrite: false,
+                depthTest: false,
             }));
-            sprite.scale.setScalar(raceTrail.glowWidth);
-            sprite.renderOrder = 22;
+            sprite.scale.setScalar(scale);
+            sprite.renderOrder = renderOrder;
+            sprite.visible = false;
             this.add(sprite);
             return sprite;
-        });
+        };
+
+        let trailClusters = Array(raceTrail.sampleCount).fill(0).map(() => ({
+            halo: createSprite(raceTrail.haloOpacity, raceTrail.haloScale, 19, 0.12),
+            primary: createSprite(raceTrail.clusterOpacity, raceTrail.clusterScale, 21, 0.06),
+            secondary: Array(3).fill(0).map((_, index) =>
+                createSprite(
+                    raceTrail.clusterOpacity * (0.64 - index * 0.1),
+                    raceTrail.clusterScale * (0.68 - index * 0.08),
+                    20,
+                    0.08 + index * 0.04,
+                )),
+            spark: createSprite(raceTrail.particleOpacity, raceTrail.particleScale, 22, 0.2),
+        }));
 
         return {
-            glowSprites,
-            trailCore,
-            trailFin,
-            trailShell,
+            trailClusters,
             wobblePhase: Math.random() * Math.PI * 2,
         };
     }
 
-    setMarkerOpacity(markerGroup: THREE.Group | undefined, opacity: number) {
-        if (!markerGroup)
+    setMarkerOpacity(markerElements: RaceMarkerElements | undefined, opacity: number) {
+        if (!markerElements)
             return;
-
-        for (let child of markerGroup.children) {
-            let material = child instanceof THREE.Sprite ?
-                child.material as THREE.SpriteMaterial :
-                undefined;
-            if (!material)
-                continue;
-
-            let childOpacity = child.name === "race-name" &&
-                this.countdown < 6000 ?
-                0 :
-                child.name === "race-pointer" && this.countdown < 6000 ?
-                    opacity * raceTrail.markerCountdownFadeScale :
-                    opacity;
-            material.opacity = childOpacity;
-            material.transparent = true;
-        }
+        markerElements.root.style.opacity = `${THREE.MathUtils.clamp(opacity, 0, 1)}`;
     }
 
     getMarkerOpacity(position: THREE.Vector3): number {
@@ -1008,7 +959,7 @@ export default class GameScene extends THREE.Scene {
                 id: "player",
                 identityColor: raceIdentityColors[0],
                 isLocalPlayer: true,
-                markerGroup: undefined,
+                markerElements: undefined,
                 trailPositions: [],
                 vehicle: this.player,
             },
@@ -1025,7 +976,7 @@ export default class GameScene extends THREE.Scene {
                 id: `cpu-${i + 1}`,
                 identityColor,
                 isLocalPlayer: false,
-                markerGroup: this.createIdentityMarker(menuVehicle.label, identityColor),
+                markerElements: this.createRaceMarker(menuVehicle.label, identityColor),
                 trailPositions: [],
                 vehicle: this.CPUs[i],
             });
@@ -1071,33 +1022,59 @@ export default class GameScene extends THREE.Scene {
         return effectiveTrail;
     }
 
+    updateMarkerPlacement(state: RaceVehicleState, markerPosition: THREE.Vector3) {
+        if (!state.markerElements)
+            return;
+
+        let markerBounds = this.ui.markerHost.getBoundingClientRect();
+        let projected = markerPosition.clone().project(this.camera);
+        let isInFrontOfCamera = projected.z <= 1;
+        let screenX = (projected.x * 0.5 + 0.5) * markerBounds.width;
+        let screenY = (-projected.y * 0.5 + 0.5) * markerBounds.height;
+        let edgePadding = 18;
+        let clampedX = THREE.MathUtils.clamp(
+            screenX,
+            edgePadding,
+            markerBounds.width - edgePadding,
+        );
+        let clampedY = THREE.MathUtils.clamp(
+            screenY,
+            edgePadding,
+            markerBounds.height - edgePadding,
+        );
+        state.markerElements.root.style.transform =
+            `translate(${clampedX}px, ${clampedY}px) translate(-50%, -100%)`;
+        state.markerElements.root.style.display = isInFrontOfCamera ?
+            "flex" :
+            "none";
+    }
+
     updateRaceVehicleState(state: RaceVehicleState) {
         let vehicle = state.vehicle;
         if (!vehicle?.hitbox)
             return;
 
         if (state.isLocalPlayer) {
-            if (state.markerGroup) {
-                this.setMarkerOpacity(state.markerGroup, 0);
-                state.markerGroup.visible = false;
+            if (state.markerElements) {
+                this.setMarkerOpacity(state.markerElements, 0);
+                state.markerElements.root.style.display = "none";
             }
-        } else if (state.markerGroup) {
+        } else if (state.markerElements) {
             let validMarkerOwner = this.raceVehicleStates.some(otherState =>
                 !otherState.isLocalPlayer &&
-                otherState.markerGroup === state.markerGroup,
+                otherState.markerElements === state.markerElements,
             );
             if (!validMarkerOwner) {
-                this.setMarkerOpacity(state.markerGroup, 0);
-                state.markerGroup.visible = false;
+                this.setMarkerOpacity(state.markerElements, 0);
+                state.markerElements.root.style.display = "none";
                 return;
             }
-            state.markerGroup.position.copy(vehicle.position);
-            state.markerGroup.position.y += vehicle.height * 0.5 + 1.35;
-            state.markerGroup.lookAt(this.camera.position);
-            state.markerGroup.visible = true;
+            let markerPosition = vehicle.position.clone();
+            markerPosition.y += vehicle.height * 0.5 + raceTrail.markerWorldOffset;
+            this.updateMarkerPlacement(state, markerPosition);
             this.setMarkerOpacity(
-                state.markerGroup,
-                this.getMarkerOpacity(state.markerGroup.position),
+                state.markerElements,
+                this.getMarkerOpacity(markerPosition),
             );
         }
 
@@ -1135,26 +1112,18 @@ export default class GameScene extends THREE.Scene {
         let visibleCount = trailVisible ?
             Math.min(effectiveCount, raceTrail.sampleCount) :
             0;
-
-        let shellAttribute = state.trailShell.geometry
-            .getAttribute("position") as THREE.BufferAttribute;
-        let finAttribute = state.trailFin.geometry
-            .getAttribute("position") as THREE.BufferAttribute;
-        let coreAttribute = state.trailCore.geometry
-            .getAttribute("position") as THREE.BufferAttribute;
         let wobbleTime = performance.now() * raceTrail.flowSpeed + state.wobblePhase;
         for (let i = 0; i < raceTrail.sampleCount; i++) {
             let point = state.effectiveTrailPositions[i];
             let nextPoint = state.effectiveTrailPositions[i + 1];
             let previousPoint = i > 0 ? state.effectiveTrailPositions[i - 1] : undefined;
+            let cluster = state.trailClusters[i];
             if (!point) {
-                shellAttribute.setXYZ(i * 2, 0, 0, 0);
-                shellAttribute.setXYZ(i * 2 + 1, 0, 0, 0);
-                finAttribute.setXYZ(i * 2, 0, 0, 0);
-                finAttribute.setXYZ(i * 2 + 1, 0, 0, 0);
-                coreAttribute.setXYZ(i * 2, 0, 0, 0);
-                coreAttribute.setXYZ(i * 2 + 1, 0, 0, 0);
-                state.glowSprites[i].visible = false;
+                cluster.halo.visible = false;
+                cluster.primary.visible = false;
+                cluster.spark.visible = false;
+                for (let sprite of cluster.secondary)
+                    sprite.visible = false;
                 continue;
             }
             let trailDirection = nextPoint ?
@@ -1162,34 +1131,21 @@ export default class GameScene extends THREE.Scene {
                 previousPoint ?
                     previousPoint.clone().sub(point).normalize() :
                     vehicle.direction.clone().negate().normalize();
-            let cameraDirection = this.camera.position.clone().sub(point).normalize();
             let widthProgress = visibleCount > 1 ?
                 1 - i / (visibleCount - 1) :
                 1;
             let shapeFade = THREE.MathUtils.lerp(0.82, 1, widthProgress);
-            let shellWidth = THREE.MathUtils.lerp(
-                raceTrail.coreWidth * 0.32,
-                raceTrail.glowWidth * 0.86,
-                widthProgress,
-            );
-            let coreWidth = THREE.MathUtils.lerp(
-                raceTrail.coreWidth * 0.16,
-                raceTrail.coreWidth * 0.7,
-                widthProgress,
-            );
-            let finHeight = THREE.MathUtils.lerp(
-                raceTrail.coreWidth * 0.16,
-                raceTrail.glowWidth * 0.48,
-                widthProgress,
-            );
-            let lateral = trailDirection.clone().cross(cameraDirection).normalize();
+            let stableUp = vehicle.hitbox.up.clone().normalize();
+            if (stableUp.lengthSq() < 0.0001)
+                stableUp = new THREE.Vector3(0, 1, 0);
+            let lateral = stableUp.clone().cross(trailDirection).normalize();
             if (lateral.lengthSq() < 0.0001)
                 lateral = new THREE.Vector3(0, 1, 0).cross(trailDirection).normalize();
             if (lateral.lengthSq() < 0.0001)
                 lateral = new THREE.Vector3(1, 0, 0);
-            let viewUp = lateral.clone().cross(trailDirection).normalize();
+            let viewUp = trailDirection.clone().cross(lateral).normalize();
             if (viewUp.lengthSq() < 0.0001)
-                viewUp = new THREE.Vector3(0, 1, 0);
+                viewUp = stableUp.clone();
             let sideWave = Math.sin(wobbleTime + i * 0.22) *
                 raceTrail.wobbleStrength *
                 widthProgress;
@@ -1197,70 +1153,77 @@ export default class GameScene extends THREE.Scene {
                 raceTrail.wobbleStrength *
                 widthProgress *
                 0.45;
-            let shellOffset = lateral.clone().multiplyScalar(sideWave * 0.22)
-                .add(viewUp.clone().multiplyScalar(liftWave * 0.4));
-            let coreOffset = lateral.clone().multiplyScalar(sideWave * 0.08)
-                .add(viewUp.clone().multiplyScalar(liftWave * 0.14));
-            let finSkew = lateral.clone().multiplyScalar(
-                Math.sin(wobbleTime * 0.92 + i * 0.18) *
-                raceTrail.wobbleStrength *
-                widthProgress *
-                0.16,
-            );
-            let shellLeft = point.clone()
-                .add(lateral.clone().multiplyScalar(shellWidth))
-                .add(shellOffset);
-            let shellRight = point.clone()
-                .add(lateral.clone().multiplyScalar(-shellWidth))
-                .add(shellOffset);
-            shellAttribute.setXYZ(i * 2, shellLeft.x, shellLeft.y, shellLeft.z);
-            shellAttribute.setXYZ(i * 2 + 1, shellRight.x, shellRight.y, shellRight.z);
-
-            let finTop = point.clone()
-                .add(viewUp.clone().multiplyScalar(finHeight))
-                .add(finSkew);
-            let finBottom = point.clone()
-                .add(viewUp.clone().multiplyScalar(-finHeight * 0.74))
-                .sub(finSkew);
-            finAttribute.setXYZ(i * 2, finTop.x, finTop.y, finTop.z);
-            finAttribute.setXYZ(i * 2 + 1, finBottom.x, finBottom.y, finBottom.z);
-
-            let coreLeft = point.clone()
-                .add(lateral.clone().multiplyScalar(coreWidth))
-                .add(coreOffset);
-            let coreRight = point.clone()
-                .add(lateral.clone().multiplyScalar(-coreWidth))
-                .add(coreOffset);
-            coreAttribute.setXYZ(i * 2, coreLeft.x, coreLeft.y, coreLeft.z);
-            coreAttribute.setXYZ(i * 2 + 1, coreRight.x, coreRight.y, coreRight.z);
-
-            let glowSprite = state.glowSprites[i];
-            let glowScale = THREE.MathUtils.lerp(
-                raceTrail.coreWidth * 0.72,
-                raceTrail.glowWidth * 1.42,
+            let shellOffset = lateral.clone().multiplyScalar(sideWave * 0.18)
+                .add(viewUp.clone().multiplyScalar(liftWave * 0.46));
+            let coreOffset = lateral.clone().multiplyScalar(sideWave * 0.04 * raceTrail.clusterSpread)
+                .add(viewUp.clone().multiplyScalar(liftWave * 0.18));
+            let clusterScale = THREE.MathUtils.lerp(
+                raceTrail.clusterScale * 0.45,
+                raceTrail.clusterScale * 1.18,
                 widthProgress,
             );
-            glowSprite.position.copy(point.clone().add(shellOffset.multiplyScalar(0.35)));
-            glowSprite.scale.set(glowScale * 1.6, glowScale * 0.78, 1);
-            let glowMaterial = glowSprite.material as THREE.SpriteMaterial;
-            glowMaterial.opacity = raceTrail.glowOpacity * shapeFade;
-            glowSprite.visible = trailVisible && i < visibleCount;
+            let clusterVisible = trailVisible && i < visibleCount;
+            let basePosition = point.clone().add(shellOffset.multiplyScalar(0.42));
+            cluster.primary.position.copy(basePosition.clone().add(coreOffset));
+            cluster.primary.scale.set(clusterScale * 1.18, clusterScale * 0.72, 1);
+            (cluster.primary.material as THREE.SpriteMaterial).opacity =
+                raceTrail.clusterOpacity * shapeFade;
+            cluster.primary.visible = clusterVisible;
+
+            cluster.halo.position.copy(basePosition);
+            cluster.halo.scale.set(
+                clusterScale * raceTrail.haloScale * 1.28,
+                clusterScale * raceTrail.haloScale * 0.94,
+                1,
+            );
+            (cluster.halo.material as THREE.SpriteMaterial).opacity =
+                raceTrail.haloOpacity * shapeFade;
+            cluster.halo.visible = clusterVisible;
+
+            for (let j = 0; j < cluster.secondary.length; j++) {
+                let offsetDirection = j % 2 === 0 ? 1 : -1;
+                let liftDirection = j === 2 ? -1 : 1;
+                let secondaryOffset = lateral.clone().multiplyScalar(
+                    raceTrail.clusterSpread * (0.24 + j * 0.08) * offsetDirection * widthProgress,
+                ).add(viewUp.clone().multiplyScalar(
+                    raceTrail.clusterSpread * 0.18 * liftDirection * widthProgress,
+                ));
+                let secondarySprite = cluster.secondary[j];
+                secondarySprite.position.copy(basePosition.clone().add(secondaryOffset));
+                secondarySprite.scale.set(
+                    clusterScale * (0.68 - j * 0.08),
+                    clusterScale * (0.46 - j * 0.05),
+                    1,
+                );
+                (secondarySprite.material as THREE.SpriteMaterial).opacity =
+                    raceTrail.clusterOpacity * (0.52 - j * 0.06) * shapeFade;
+                secondarySprite.visible = clusterVisible;
+            }
+
+            cluster.spark.position.copy(
+                basePosition.clone().add(
+                    lateral.clone().multiplyScalar(
+                        Math.sin(wobbleTime + i * 0.3) *
+                        raceTrail.particleSpread *
+                        widthProgress,
+                    ),
+                ),
+            );
+            cluster.spark.scale.setScalar(
+                raceTrail.particleScale * (0.7 + widthProgress * 0.9),
+            );
+            (cluster.spark.material as THREE.SpriteMaterial).opacity =
+                raceTrail.particleOpacity * shapeFade;
+            cluster.spark.visible = clusterVisible && i % 3 === 0;
         }
-        shellAttribute.needsUpdate = true;
-        finAttribute.needsUpdate = true;
-        coreAttribute.needsUpdate = true;
-        let drawIndexCount = Math.max((visibleCount - 1) * 6, 0);
-        state.trailShell.geometry.setDrawRange(0, drawIndexCount);
-        state.trailFin.geometry.setDrawRange(0, drawIndexCount);
-        state.trailCore.geometry.setDrawRange(0, drawIndexCount);
-        state.trailShell.material.opacity = raceTrail.opacity * 0.48;
-        state.trailFin.material.opacity = raceTrail.opacity * 0.2;
-        state.trailCore.material.opacity = raceTrail.opacity * 0.08;
-        state.trailShell.mesh.visible = trailVisible;
-        state.trailFin.mesh.visible = trailVisible;
-        state.trailCore.mesh.visible = trailVisible;
-        for (let i = visibleCount; i < state.glowSprites.length; i++)
-            state.glowSprites[i].visible = false;
+        for (let i = visibleCount; i < state.trailClusters.length; i++) {
+            let cluster = state.trailClusters[i];
+            cluster.halo.visible = false;
+            cluster.primary.visible = false;
+            cluster.spark.visible = false;
+            for (let sprite of cluster.secondary)
+                sprite.visible = false;
+        }
     }
 
     updateRaceVehicleStates() {
@@ -1297,7 +1260,7 @@ export default class GameScene extends THREE.Scene {
                     state.vehicle.position,
                     otherState.effectiveTrailPositions,
                 );
-                if (distance <= raceTrail.zoneRadius) {
+                if (distance <= raceTrail.draftZoneRadius) {
                     insideTrail = true;
                     break;
                 }
@@ -1652,6 +1615,16 @@ export default class GameScene extends THREE.Scene {
         });
         this.orbitals?.dispose();
         this.renderer?.dispose();
+        for (let state of this.raceVehicleStates || []) {
+            state.markerElements?.root.remove();
+            for (let cluster of state.trailClusters || []) {
+                this.remove(cluster.halo);
+                this.remove(cluster.primary);
+                this.remove(cluster.spark);
+                for (let sprite of cluster.secondary)
+                    this.remove(sprite);
+            }
+        }
         this.clear();
     }
 }

@@ -43,11 +43,16 @@ class AppShell {
             finishTime: this.requireElement<HTMLElement>("finish-time"),
             joystick: this.requireElement<HTMLElement>("joystick"),
             knob: this.requireElement<HTMLElement>("knob"),
+            markerHost: this.requireElement<HTMLElement>("marker-layer"),
             timer: this.requireElement<HTMLElement>("timer"),
         };
         this.raceUi.curtain.style.position = "fixed";
         this.raceUi.curtain.style.inset = "0";
         this.raceUi.curtain.style.zIndex = "20";
+        this.raceUi.markerHost.style.position = "absolute";
+        this.raceUi.markerHost.style.inset = "0";
+        this.raceUi.markerHost.style.zIndex = "12";
+        this.raceUi.markerHost.style.pointerEvents = "none";
         this.raceUi.finishScreen.style.position = "absolute";
         this.raceUi.finishScreen.style.inset = "0";
         this.raceUi.finishScreen.style.zIndex = "30";
@@ -72,6 +77,7 @@ class AppShell {
         this.currentTime = safeTimestamp;
 
         if (this.currentScene) {
+            this.currentScene.update(dt);
             this.currentScene.camera.updateProjectionMatrix();
             if (this.currentScene instanceof GameScene) {
                 this.currentScene.composer.render();
@@ -80,8 +86,6 @@ class AppShell {
             } else {
                 this.currentScene.renderer.render(this.currentScene, this.currentScene.camera);
             }
-
-            this.currentScene.update(dt);
         }
 
         requestAnimationFrame((nextTimestamp?: number) => this.animate(nextTimestamp));
