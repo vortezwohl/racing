@@ -122,7 +122,7 @@ let track_1: TrackData = {
         }
     ],
     backgroundColors: ["#03040c", "#05081a", "#020208"],
-    backgroundStyle: "radial-gradient(circle at 18% 18%, rgba(72, 112, 196, 0.56), transparent 31%), radial-gradient(circle at 82% 12%, rgba(168, 96, 214, 0.72), transparent 40%), linear-gradient(180deg, #03040c 0%, #091226 52%, #020208 100%)",
+    backgroundStyle: "radial-gradient(circle at 18% 18%, rgba(86, 132, 224, 0.6), transparent 30%), radial-gradient(circle at 52% 14%, rgba(132, 102, 238, 0.42), transparent 34%), radial-gradient(circle at 82% 16%, rgba(184, 104, 224, 0.76), transparent 40%), radial-gradient(circle at 72% 34%, rgba(86, 128, 220, 0.22), transparent 32%), linear-gradient(180deg, #03040c 0%, #091226 42%, #070b1f 68%, #020208 100%)",
     signsPoints: [
         {
             points: [[550, 1, 50]],
