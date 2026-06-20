@@ -196,18 +196,18 @@ export default class Vehicle {
             if (!handledCheckpoint) {
                 for (let checkpoint of track.checkpoints) {
                     let checkpointResult = ray.intersectObject(checkpoint.mesh);
+                    let nextCheckpointIndex =
+                        this.lastCheckpointIndex % track.checkpoints.length + 1;
 
                     if (checkpointResult.length > 0 &&
                         checkpointResult[0].distance < directionVector.length()) {
 
-                        // if the last checkpoint index is less than the current,
-                        // update the last checkpoint to the current
-                        // take the modulus of the index so that the last checkpoint's
-                        // value is less than the first checkpoint
-                        // this allows checkpoints to be skipped in order to enable shortcuts
-                        if (checkpoint.index > (this.lastCheckpointIndex % track.checkpoints.length)) {
+                        // 只接受当前顺序中的下一个 checkpoint，
+                        // 避免绕场时被其他 checkpoint 提前截获导致圈数错乱。
+                        if (checkpoint.index == nextCheckpointIndex) {
                             if (checkpoint.index == 1) {
                                 this.laps++;
+                                document.body.dataset.playerLaps = this.laps.toString();
 
                                 if (player) {
                                     this.sounds["complete-lap"]?.play();
@@ -219,10 +219,14 @@ export default class Vehicle {
                             
                             this.lastCheckpointIndex = checkpoint.index;
                             this.checkpoint = checkpoint;
+                            document.body.dataset.lastCheckpointIndex = this.lastCheckpointIndex.toString();
+                            console.info("[checkpoint] passed", {
+                                checkpointIndex: checkpoint.index,
+                                laps: this.laps,
+                            });
+                            handledCheckpoint = true;
+                            break;
                         }
-
-                        handledCheckpoint = true;
-                        break;
                     }
                 }
             }

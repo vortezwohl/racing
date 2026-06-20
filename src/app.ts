@@ -4,7 +4,13 @@ import { RaceUi } from "./utils/interfaces";
 
 type AppRoute =
     | { view: "menu" }
-    | { speederIndex: number; view: "race" };
+    | { finishPreview?: boolean; speederIndex: number; view: "race" };
+
+type DebugWindow = Window & typeof globalThis & {
+    __appShell?: AppShell;
+    __gameScene?: GameScene | null;
+    __menuScene?: MenuScene;
+};
 
 class AppShell {
     currentScene: GameScene | MenuScene | null;
@@ -42,6 +48,9 @@ class AppShell {
         this.raceUi.curtain.style.position = "fixed";
         this.raceUi.curtain.style.inset = "0";
         this.raceUi.curtain.style.zIndex = "20";
+        this.raceUi.finishScreen.style.position = "absolute";
+        this.raceUi.finishScreen.style.inset = "0";
+        this.raceUi.finishScreen.style.zIndex = "30";
 
         this.menuScene = new MenuScene({
             canvas: this.menuCanvas,
@@ -50,6 +59,7 @@ class AppShell {
                 this.navigateToRace(speederIndex);
             },
         });
+        this.attachDebugRefs();
 
         window.addEventListener("hashchange", () => {
             this.syncRoute();
@@ -83,6 +93,7 @@ class AppShell {
 
         this.gameScene = new GameScene({
             canvas: this.gameCanvas,
+            finishPreview: false,
             speederIndex,
             ui: this.raceUi,
         });
@@ -97,6 +108,7 @@ class AppShell {
             let parameters = new URLSearchParams(queryString || "");
             let speederIndex = parseInt(parameters.get("speeder") || "0", 10);
             return {
+                finishPreview: parameters.get("finishPreview") === "1",
                 speederIndex: Number.isNaN(speederIndex) ? 0 : speederIndex,
                 view: "race",
             };
@@ -116,6 +128,13 @@ class AppShell {
 
     navigateToRace(speederIndex: number) {
         window.location.hash = `#/race?speeder=${speederIndex}`;
+    }
+
+    attachDebugRefs() {
+        let debugWindow = window as DebugWindow;
+        debugWindow.__appShell = this;
+        debugWindow.__menuScene = this.menuScene;
+        debugWindow.__gameScene = this.gameScene;
     }
 
     requireElement<T extends HTMLElement>(id: string): T {
@@ -161,6 +180,7 @@ class AppShell {
                 this.gameScene.dispose();
                 this.gameScene = null;
             }
+            this.attachDebugRefs();
             this.menuScene.activate();
             this.menuScene.reset();
             this.currentScene = this.menuScene;
@@ -170,7 +190,9 @@ class AppShell {
 
         this.menuScene.deactivate();
         let gameScene = this.ensureGameScene(route.speederIndex);
+        gameScene.finishPreview = !!route.finishPreview;
         this.currentScene = gameScene;
+        this.attachDebugRefs();
         this.setActiveView("race");
         gameScene.activate();
     }

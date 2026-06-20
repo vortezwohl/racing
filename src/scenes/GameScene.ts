@@ -42,6 +42,12 @@ type FloatingCluster = {
     rotationRate: THREE.Vector3;
 };
 
+type RaceDebugState = {
+    finishHandledAt?: number;
+    finishPanelVisibleAt?: number;
+    laps: number;
+};
+
 export default class GameScene extends THREE.Scene {
     active: boolean;
     canvas: HTMLCanvasElement;
@@ -71,6 +77,7 @@ export default class GameScene extends THREE.Scene {
     countdown: number;
     fadeInTimeout?: number;
     finished: boolean;
+    finishPreview: boolean;
     finishScreenTimeout?: number;
     handleKeyDownBound: (e: KeyboardEvent) => void;
     handleKeyUpBound: (e: KeyboardEvent) => void;
@@ -78,6 +85,7 @@ export default class GameScene extends THREE.Scene {
     handleKnobTouchEndBound?: () => void;
     handleKnobTouchMoveBound?: (e: TouchEvent) => void;
 
+    debugState: RaceDebugState;
     sounds: { [key: string]: HTMLAudioElement };
     ui: RaceUi;
 
@@ -119,6 +127,10 @@ export default class GameScene extends THREE.Scene {
 
         this.countdown = 0;
         this.finished = false;
+        this.finishPreview = !!options.finishPreview;
+        this.debugState = {
+            laps: 1,
+        };
 
         this.sounds = {
             "countdown": new Audio("./assets/sounds/countdown.wav"),
@@ -132,10 +144,17 @@ export default class GameScene extends THREE.Scene {
         this.ui.timer.innerHTML = "00:00:00";
         this.ui.dashboard.style.display = "block";
         this.ui.finishScreen.style.display = "none";
+        this.ui.finishScreen.style.opacity = "0";
         this.ui.finishRank.innerHTML = "";
         this.ui.finishRankSuffix.innerHTML = "";
         this.ui.finishTime.innerHTML = "";
         this.ui.joystick.style.display = "none";
+        this.debugState.finishHandledAt = undefined;
+        this.debugState.finishPanelVisibleAt = undefined;
+        this.debugState.laps = 1;
+        document.body.dataset.raceFinished = "false";
+        document.body.dataset.finishPanelVisible = "false";
+        document.body.dataset.playerLaps = "1";
         this.ui.curtain.classList.remove("fade-to-black", "long-fade-to-black", "scroll-up");
         this.ui.curtain.classList.add("fade-in");
         this.ui.curtain.style.opacity = "1";
@@ -777,6 +796,14 @@ export default class GameScene extends THREE.Scene {
     handleRaceFinish() {
         if (!this.finished) {
             this.ui.curtain.classList.add("long-fade-to-black");
+            this.debugState.finishHandledAt = performance.now();
+            this.debugState.laps = this.player.laps;
+            document.body.dataset.raceFinished = "true";
+            document.body.dataset.playerLaps = this.player.laps.toString();
+            console.info("[finish] handleRaceFinish", {
+                laps: this.player.laps,
+                timestamp: this.debugState.finishHandledAt,
+            });
             
             let rank = 1;
             for (let cpu of this.CPUs)
@@ -785,20 +812,28 @@ export default class GameScene extends THREE.Scene {
             
             this.ui.dashboard.style.display = "none";
             this.ui.joystick.style.display = "none";
-            
-            this.finishScreenTimeout = window.setTimeout(() => {            
-                this.player.sounds["complete-race"]?.play();
+            this.ui.finishScreen.style.display = "flex";
+            this.ui.finishScreen.style.opacity = "1";
+            this.debugState.finishPanelVisibleAt = performance.now();
+            document.body.dataset.finishPanelVisible = "true";
+            console.info("[finish] finishScreenVisible", {
+                rank,
+                timestamp: this.debugState.finishPanelVisibleAt,
+                time: this.track.getTimeString(),
+            });
+
+            let suffixes = ["st", "nd", "rd"]
+            this.ui.finishRank.innerHTML = rank.toString();
+            this.ui.finishRankSuffix.innerHTML = suffixes[rank - 1];
+            this.ui.finishTime.innerHTML =
+                `Time: ${this.track.getTimeString()}`;
+
+            this.player.sounds["complete-race"]?.play();
+            try {
                 this.player.engineSound.stop();
-                
-                this.ui.finishScreen.style.display = "flex";
-
-                let suffixes = ["st", "nd", "rd"]
-                this.ui.finishRank.innerHTML = rank.toString();
-                this.ui.finishRankSuffix.innerHTML = suffixes[rank - 1];
-
-                this.ui.finishTime.innerHTML = 
-                    `Time: ${this.track.getTimeString()}`;
-            }, 650);
+            } catch (_error) {
+                // Avoid blocking the finish overlay if engine audio was already stopped.
+            }
 
             this.finished = true;
         }
@@ -863,7 +898,15 @@ export default class GameScene extends THREE.Scene {
         if (this.countdown < 6000)
             return;
 
+        if (this.finishPreview) {
+            this.player.laps = 3;
+            this.handleRaceFinish();
+            return;
+        }
+
         // race ends after 2 laps
+        this.debugState.laps = this.player.laps;
+        document.body.dataset.playerLaps = this.player.laps.toString();
         if (this.player.laps > 2)
             this.handleRaceFinish();
         else
@@ -922,6 +965,7 @@ export default class GameScene extends THREE.Scene {
             this.ui.knob.removeEventListener("touchend", this.handleKnobTouchEndBound, false);
 
         this.ui.finishScreen.style.display = "none";
+        this.ui.finishScreen.style.opacity = "0";
         this.ui.countdown.innerHTML = "";
         this.ui.curtain.classList.remove("fade-in", "fade-to-black", "long-fade-to-black", "scroll-up");
         this.ui.curtain.style.opacity = "0";

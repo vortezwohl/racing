@@ -39,6 +39,7 @@ export default class Track {
         let material = new THREE.MeshBasicMaterial({ 
             color: 0xff0000,
             wireframe: true,
+            side: THREE.DoubleSide,
             transparent: !debug,
             opacity: 0
         });

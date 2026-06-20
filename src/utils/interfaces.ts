@@ -125,6 +125,7 @@ interface RaceUi {
 interface GameSceneOptions {
     canvas: HTMLCanvasElement;
     debug?: boolean;
+    finishPreview?: boolean;
     speederIndex: number;
     ui: RaceUi;
 }
