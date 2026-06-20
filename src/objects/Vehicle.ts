@@ -25,9 +25,11 @@ export default class Vehicle {
 
     width: number;
     height: number;
+    checkpointHitboxScale: number;
     hitboxScale: number;
     length: number;
 
+    checkpointHitboxGeometry: THREE.BoxGeometry;
     model: THREE.Group;
     hitbox: THREE.Mesh<THREE.BoxGeometry, THREE.MeshBasicMaterial>;
     outOfBoundsRecoverTimeout?: number;
@@ -68,8 +70,14 @@ export default class Vehicle {
 
         this.width = vehicleData.width;
         this.height = vehicleData.height;
-        this.hitboxScale = 0.85;
+        this.checkpointHitboxScale = 1.0;
+        this.hitboxScale = 0.5;
         this.length = vehicleData.length;
+        this.checkpointHitboxGeometry = new THREE.BoxGeometry(
+            this.width * this.checkpointHitboxScale,
+            this.height * this.checkpointHitboxScale,
+            this.length * this.checkpointHitboxScale,
+        );
 
         this.render(scene, vehicleData.modelPath, debug);
 
@@ -219,13 +227,25 @@ export default class Vehicle {
 
             // use raycasting to handle collision with checkpoint planes too
             if (!handledCheckpoint) {
+                let checkpointLocalVertex = new THREE.Vector3(
+                    this.checkpointHitboxGeometry.attributes.position.array[i * 3],
+                    this.checkpointHitboxGeometry.attributes.position.array[i * 3 + 1],
+                    this.checkpointHitboxGeometry.attributes.position.array[i * 3 + 2],
+                );
+                let checkpointGlobalVertex = checkpointLocalVertex.applyMatrix4(this.hitbox.matrix);
+                let checkpointDirectionVector = checkpointGlobalVertex.sub(this.hitbox.position);
+                let checkpointRay = new THREE.Raycaster(
+                    currentPosition,
+                    checkpointDirectionVector.clone().normalize(),
+                );
+
                 for (let checkpoint of track.checkpoints) {
-                    let checkpointResult = ray.intersectObject(checkpoint.mesh);
+                    let checkpointResult = checkpointRay.intersectObject(checkpoint.mesh);
                     let nextCheckpointIndex =
                         this.lastCheckpointIndex % track.checkpoints.length + 1;
 
                     if (checkpointResult.length > 0 &&
-                        checkpointResult[0].distance < directionVector.length()) {
+                        checkpointResult[0].distance < checkpointDirectionVector.length()) {
 
                         // 只接受当前顺序中的下一个 checkpoint，
                         // 避免绕场时被其他 checkpoint 提前截获导致圈数错乱。
