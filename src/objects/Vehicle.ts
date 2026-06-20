@@ -5,6 +5,13 @@ import { DynamicDebugVector } from "../utils/debug";
 import { Checkpoint, VehicleData } from "../utils/interfaces";
 import { racePerformance } from "../utils/raceConfig";
 
+type VehicleControlInput = {
+    accelerationScale?: number;
+    brake?: number;
+    steer?: number;
+    throttle?: number;
+};
+
 export default class Vehicle {
     acceleration: number;
     deceleration: number;
@@ -22,6 +29,8 @@ export default class Vehicle {
     collisionSlowUntil: number;
     draftCharge: number;
     maxSpeed: number;
+    lastSteerSign: number;
+    steerHoldMs: number;
 
     width: number;
     height: number;
@@ -67,6 +76,8 @@ export default class Vehicle {
         this.collisionSlowUntil = 0;
         this.draftCharge = 0;
         this.maxSpeed = racePerformance.maxSpeed;
+        this.lastSteerSign = 0;
+        this.steerHoldMs = 0;
 
         this.width = vehicleData.width;
         this.height = vehicleData.height;
@@ -298,6 +309,43 @@ export default class Vehicle {
         this.direction.applyAxisAngle(this.hitbox.up, angle);
     }
 
+    updateSteeringHold(steer: number, dt: number): number {
+        let steerSign = Math.sign(steer);
+        if (steerSign == 0) {
+            this.steerHoldMs = 0;
+            this.lastSteerSign = 0;
+            return 0;
+        }
+
+        if (steerSign != this.lastSteerSign)
+            this.steerHoldMs = 0;
+        else
+            this.steerHoldMs += dt;
+
+        this.lastSteerSign = steerSign;
+        return this.steerHoldMs;
+    }
+
+    getSteeringScale(steer: number, dt: number): number {
+        let steerHoldMs = this.updateSteeringHold(steer, dt);
+        if (steer == 0)
+            return 0;
+
+        let holdRatio = THREE.MathUtils.clamp(
+            steerHoldMs / racePerformance.turnSustainMs,
+            0,
+            1,
+        );
+        let holdScale = THREE.MathUtils.lerp(
+            racePerformance.turnInitialBoost,
+            racePerformance.turnSustainScale,
+            Math.pow(holdRatio, 0.85),
+        );
+        let speedScale = 1 - racePerformance.highSpeedTurnDamping *
+            Math.pow(this.getSpeedRatio(), 1.2);
+        return holdScale * speedScale;
+    }
+
     getDraftAccelerationScale(): number {
         return 1 + this.draftCharge * racePerformance.draftAccelerationBonus;
     }
@@ -315,8 +363,60 @@ export default class Vehicle {
             this.getCollisionSlowScale(now);
     }
 
+    getSpeedRatio(): number {
+        let maxSpeed = Math.max(this.getEffectiveMaxSpeed(), 0.0001);
+        return THREE.MathUtils.clamp(this.velocity.length() / maxSpeed, 0, 1);
+    }
+
+    getAccelerationCurveScale(): number {
+        let curveProgress = Math.pow(
+            1 - this.getSpeedRatio(),
+            racePerformance.accelerationCurveExponent,
+        );
+        return THREE.MathUtils.lerp(
+            racePerformance.minAccelerationScale,
+            racePerformance.lowSpeedAccelerationScale,
+            curveProgress,
+        );
+    }
+
+    getCurvedAcceleration(
+        inputScale: number = 1,
+        now: number = performance.now(),
+    ): number {
+        return this.getEffectiveAcceleration(now) *
+            this.getAccelerationCurveScale() *
+            inputScale;
+    }
+
     getEffectiveMaxSpeed(): number {
         return this.maxSpeed * this.getDraftMaxSpeedScale();
+    }
+
+    applyControlInput(input: VehicleControlInput, dt: number) {
+        let throttle = THREE.MathUtils.clamp(input.throttle || 0, 0, 1);
+        let brake = THREE.MathUtils.clamp(input.brake || 0, 0, 1);
+        let steer = THREE.MathUtils.clamp(input.steer || 0, -1, 1);
+        let accelerationScale = input.accelerationScale || 1;
+
+        if (throttle > 0) {
+            this.velocity.add(this.direction.clone().multiplyScalar(
+                this.getCurvedAcceleration(accelerationScale) * this.thrust * throttle * dt,
+            ));
+        }
+
+        if (brake > 0) {
+            this.velocity.sub(this.direction.clone().multiplyScalar(
+                this.deceleration * this.thrust * brake * dt,
+            ));
+        }
+
+        if (steer != 0) {
+            let steeringScale = this.getSteeringScale(steer, dt);
+            this.turn(-steer * this.turnRate * steeringScale * dt);
+        } else {
+            this.updateSteeringHold(0, dt);
+        }
     }
 
     applySpeedLimit() {
@@ -415,6 +515,8 @@ export default class Vehicle {
         this.thrust = 1;
         this.collisionSlowUntil = 0;
         this.draftCharge = 0;
+        this.lastSteerSign = 0;
+        this.steerHoldMs = 0;
         this.syncTransform();
     }
 
@@ -428,3 +530,7 @@ export default class Vehicle {
         this.handleOutOfBounds(track);
     }
 }
+
+export {
+    VehicleControlInput,
+};

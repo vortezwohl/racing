@@ -96,27 +96,21 @@ export default class Player extends Vehicle {
     }
 
     handleInput(keysPressed: Controls, dt: number) {
-        // acceleration
-        if (keysPressed["w"])
-            this.velocity.add(this.direction.clone()
-                .multiplyScalar(this.getEffectiveAcceleration() * this.thrust * dt));
+        let throttle = keysPressed["w"] ? 1 : 0;
+        let brake = keysPressed["s"] || keysPressed["shift"] ? 1 : 0;
+        let steer = 0;
+        if (keysPressed["d"])
+            steer += 1;
+            
+        if (keysPressed["a"])
+            steer -= 1;
 
-        // deceleration
-        if (keysPressed["s"] || keysPressed["shift"])
-            this.velocity.sub(this.direction.clone()
-                .multiplyScalar(this.deceleration * this.thrust * dt));
+        this.applyControlInput({ brake, steer, throttle }, dt);
 
         if (keysPressed["w"] || keysPressed["s"] || keysPressed["shift"])
             this.engineSound.frequency.value = 50 + this.velocity.length() * 100;
         else
             this.engineSound.frequency.value *= 0.96;
-
-        // turning
-        if (keysPressed["d"])
-            this.turn(-this.turnRate * dt);
-            
-        if (keysPressed["a"])
-            this.turn(this.turnRate * dt);
 
         // reset roll
         if (!(keysPressed["a"] || keysPressed["d"]))

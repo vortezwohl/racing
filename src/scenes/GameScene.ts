@@ -70,6 +70,13 @@ type TrailClusterSet = {
     spark: THREE.Sprite;
 };
 
+type DraftRelation = {
+    distanceToTrail: number;
+    drafterId: string;
+    nearestTrailPoint: THREE.Vector3;
+    sourceId: string;
+};
+
 type RaceVehicleState = {
     displayName: string;
     effectiveTrailPositions: Array<THREE.Vector3>;
@@ -120,9 +127,10 @@ export default class GameScene extends THREE.Scene {
     satellites: Array<Satellite>;
     
     player: Player;
-    npcs: Array<Vehicle>;
+    npcs: Array<NPC>;
     npcMenuVehicles: Array<MenuVehicle>;
     raceVehicleStates: Array<RaceVehicleState>;
+    draftRelations: Array<DraftRelation>;
 
     countdown: number;
     fadeInTimeout?: number;
@@ -152,6 +160,7 @@ export default class GameScene extends THREE.Scene {
         this.floatingClusters = [];
         this.nebulaGlows = [];
         this.raceVehicleStates = [];
+        this.draftRelations = [];
         this.npcMenuVehicles = [];
         this.handleKeyDownBound = (e: KeyboardEvent) => {
             this.keysPressed[e.key.toLowerCase()] = true;
@@ -1283,38 +1292,60 @@ export default class GameScene extends THREE.Scene {
             this.updateRaceVehicleState(state);
     }
 
-    distanceToTrail(point: THREE.Vector3, trailPositions: Array<THREE.Vector3>): number {
-        if (trailPositions.length < 2)
-            return Infinity;
+    getTrailQuery(
+        point: THREE.Vector3,
+        trailPositions: Array<THREE.Vector3>,
+    ): { distance: number; nearestPoint: THREE.Vector3 } {
+        if (trailPositions.length < 2) {
+            return {
+                distance: Infinity,
+                nearestPoint: point.clone(),
+            };
+        }
 
         let nearestDistance = Infinity;
+        let nearestPoint = point.clone();
         let segment = new THREE.Line3();
         let closestPoint = new THREE.Vector3();
         for (let i = 0; i < trailPositions.length - 1; i++) {
             segment.set(trailPositions[i], trailPositions[i + 1]);
             segment.closestPointToPoint(point, true, closestPoint);
-            nearestDistance = Math.min(
-                nearestDistance,
-                closestPoint.distanceTo(point),
-            );
+            let distance = closestPoint.distanceTo(point);
+            if (distance < nearestDistance) {
+                nearestDistance = distance;
+                nearestPoint.copy(closestPoint);
+            }
         }
-        return nearestDistance;
+        return {
+            distance: nearestDistance,
+            nearestPoint,
+        };
     }
 
-    updateDraftBoosts(dt: number) {
+    distanceToTrail(point: THREE.Vector3, trailPositions: Array<THREE.Vector3>): number {
+        return this.getTrailQuery(point, trailPositions).distance;
+    }
+
+    updateDraftBoosts(dt: number): Array<DraftRelation> {
+        let draftRelations: Array<DraftRelation> = [];
         for (let state of this.raceVehicleStates) {
             let insideTrail = false;
             for (let otherState of this.raceVehicleStates) {
                 if (state.id === otherState.id)
                     continue;
 
-                let distance = this.distanceToTrail(
+                let trailQuery = this.getTrailQuery(
                     state.vehicle.position,
                     otherState.effectiveTrailPositions,
                 );
-                if (distance <= raceTrail.draftZoneRadius) {
+                if (trailQuery.distance <= raceTrail.draftZoneRadius) {
                     insideTrail = true;
-                    break;
+                    draftRelations.push({
+                        distanceToTrail: trailQuery.distance,
+                        drafterId: state.id,
+                        nearestTrailPoint: trailQuery.nearestPoint.clone(),
+                        sourceId: otherState.id,
+                    });
                 }
             }
 
@@ -1327,6 +1358,8 @@ export default class GameScene extends THREE.Scene {
                 1,
             );
         }
+        this.draftRelations = draftRelations;
+        return draftRelations;
     }
 
     separateCollidingVehicles(first: Vehicle, second: Vehicle) {
@@ -1663,8 +1696,17 @@ export default class GameScene extends THREE.Scene {
         // update vehicles
         this.player.update(this.track, dt, this.keysPressed);
 
-        for (let npc of this.npcs)
-            npc.update(this.track, dt);
+        let raceRunningMs = Math.max(0, this.countdown - 6000);
+        for (let i = 0; i < this.npcs.length; i++) {
+            let npc = this.npcs[i];
+            let npcState = this.raceVehicleStates[i + 1];
+            npc.update(this.track, dt, {
+                draftRelations: this.draftRelations,
+                raceRunningMs,
+                selfId: npcState?.id,
+                vehicleStates: this.raceVehicleStates,
+            });
+        }
 
         this.updateRaceVehicleStates();
         this.updateDraftBoosts(dt);
