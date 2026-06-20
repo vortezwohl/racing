@@ -16,26 +16,31 @@ const racePerformance = {
 };
 
 const raceCamera = {
-    draftFovBonus: 4,
-    highSpeedFov: 88,
-    lowSpeedFov: 68,
-    maxFov: 92,
+    draftFovBonus: 6,
+    highSpeedFov: 94,
+    lowSpeedFov: 64,
+    maxFov: 100,
     smoothing: 0.08,
 };
 
 const raceTrail = {
-    fadeEndDistance: 3,
-    fadeStartDistance: 8,
+    centerFadeRadiusPx: 240,
+    fadeEndDistance: 5.5,
+    fadeStartDistance: 11,
     flowSpeed: 0.006,
     glowOpacity: 0.1,
     glowWidth: 1.32,
-    maxLength: 42,
+    markerCountdownFadeScale: 0.18,
+    maxLength: 58,
     maxMarkerOpacity: 1,
-    minLength: 14,
-    minMarkerOpacity: 0.04,
+    minDisplayLength: 2.4,
+    minDisplaySpeed: 0.08,
+    minLength: 12,
+    minMarkerOpacity: 0,
     opacity: 0.42,
     sampleCount: 72,
-    coreWidth: 0.56,
+    coreWidth: 0.42,
+    lengthExponent: 1.9,
     wobbleStrength: 0.09,
     zoneRadius: 2.1,
 };

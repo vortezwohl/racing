@@ -83,6 +83,7 @@ export default class Vehicle {
     loadGLTF(scene: THREE.Scene, data: GLTF) {
         this.model = data.scene;
         this.model.position.set(this.position.x, this.position.y, this.position.z);
+        this.stripInjectedSprites(this.model);
 
         // check for and enable transparent materials
         for (let mesh of this.model.children) {
@@ -106,6 +107,17 @@ export default class Vehicle {
         }
 
         scene.add(this.model);
+    }
+
+    stripInjectedSprites(root: THREE.Object3D) {
+        let staleSprites: Array<THREE.Object3D> = [];
+        root.traverse((child: THREE.Object3D) => {
+            if (child instanceof THREE.Sprite)
+                staleSprites.push(child);
+        });
+
+        for (let sprite of staleSprites)
+            sprite.parent?.remove(sprite);
     }
 
     async render(scene: THREE.Scene, modelPath: string, debug?: boolean) {
