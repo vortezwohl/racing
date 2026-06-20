@@ -29,6 +29,16 @@ type FloatingCluster = {
     driftSpeed: number;
     mesh: THREE.Group;
     origin: THREE.Vector3;
+    pieces: Array<{
+        driftAmplitude: THREE.Vector3;
+        driftPhase: number;
+        driftSpeed: number;
+        mesh: THREE.Group;
+        origin: THREE.Vector3;
+        pulseAmplitude: number;
+        pulseSpeed: number;
+        rotationRate: THREE.Vector3;
+    }>;
     rotationRate: THREE.Vector3;
 };
 
@@ -166,7 +176,7 @@ export default class GameScene extends THREE.Scene {
             }
         }
 
-        let clusterSpecs = [
+        let baseClusterSpecs = [
             {
                 color: 0x8ac8ff,
                 opacity: 0.28,
@@ -253,7 +263,22 @@ export default class GameScene extends THREE.Scene {
             },
         ];
 
-        for (let clusterSpec of clusterSpecs) {
+        let expandedClusterSpecs = baseClusterSpecs.flatMap(clusterSpec => {
+            let sourceCount = 2 + Math.floor(Math.random() * 2);
+            return Array(sourceCount).fill(0).map(() => ({
+                color: clusterSpec.color,
+                opacity: Math.min(clusterSpec.opacity * (0.9 + Math.random() * 0.22), 0.34),
+                pointCount: Math.max(2, clusterSpec.pointCount - 2 + Math.floor(Math.random() * 2)),
+                position: clusterSpec.position.clone().add(new THREE.Vector3(
+                    (Math.random() - 0.5) * 220,
+                    (Math.random() - 0.5) * 120,
+                    (Math.random() - 0.5) * 240,
+                )),
+                scale: clusterSpec.scale * (0.52 + Math.random() * 0.28),
+            }));
+        });
+
+        for (let clusterSpec of expandedClusterSpecs) {
             let cluster = this.createFloatingCluster(
                 clusterSpec.color,
                 clusterSpec.opacity,
@@ -263,133 +288,45 @@ export default class GameScene extends THREE.Scene {
             cluster.position.copy(clusterSpec.position);
             this.floatingClusters.push({
                 driftAmplitude: new THREE.Vector3(
-                    42 + Math.random() * 34,
-                    24 + Math.random() * 20,
                     8 + Math.random() * 10,
+                    4 + Math.random() * 7,
+                    4 + Math.random() * 8,
                 ),
                 driftPhase: Math.random() * Math.PI * 2,
-                driftSpeed: 0.0001 + Math.random() * 0.00012,
+                driftSpeed: 0.00005 + Math.random() * 0.00007,
                 mesh: cluster,
                 origin: clusterSpec.position.clone(),
+                pieces: cluster.userData.pieces,
                 rotationRate: new THREE.Vector3(
-                    (Math.random() - 0.5) * 0.00016,
-                    (Math.random() - 0.5) * 0.00024,
-                    (Math.random() - 0.5) * 0.00012,
+                    (Math.random() - 0.5) * 0.00004,
+                    (Math.random() - 0.5) * 0.00006,
+                    (Math.random() - 0.5) * 0.00003,
                 ),
             });
             this.add(cluster);
         }
 
-        let glowSpecs = [
-            {
-                color: "rgba(204, 164, 255, 0.6)",
-                haloColor: "rgba(170, 222, 255, 0.34)",
-                position: new THREE.Vector3(780, 220, -1180),
-                scale: new THREE.Vector2(330, 280),
-            },
-            {
-                color: "rgba(198, 156, 255, 0.58)",
-                haloColor: "rgba(166, 216, 255, 0.32)",
-                position: new THREE.Vector3(980, 170, -760),
-                scale: new THREE.Vector2(300, 250),
-            },
-            {
-                color: "rgba(212, 166, 255, 0.58)",
-                haloColor: "rgba(170, 224, 255, 0.32)",
-                position: new THREE.Vector3(1240, 250, -260),
-                scale: new THREE.Vector2(320, 270),
-            },
-            {
-                color: "rgba(180, 228, 255, 0.5)",
-                haloColor: "rgba(210, 160, 255, 0.28)",
-                position: new THREE.Vector3(1120, 150, 180),
-                scale: new THREE.Vector2(280, 240),
-            },
-            {
-                color: "rgba(202, 160, 255, 0.54)",
-                haloColor: "rgba(168, 220, 255, 0.3)",
-                position: new THREE.Vector3(920, 220, 860),
-                scale: new THREE.Vector2(300, 250),
-            },
-            {
-                color: "rgba(210, 164, 255, 0.48)",
-                haloColor: "rgba(170, 222, 255, 0.28)",
-                position: new THREE.Vector3(1460, 180, 900),
-                scale: new THREE.Vector2(270, 230),
-            },
-            {
-                color: "rgba(206, 160, 255, 0.42)",
-                haloColor: "rgba(168, 218, 255, 0.24)",
-                position: new THREE.Vector3(900, 120, -420),
-                scale: new THREE.Vector2(240, 210),
-            },
-            {
-                color: "rgba(194, 154, 252, 0.42)",
-                haloColor: "rgba(166, 214, 255, 0.24)",
-                position: new THREE.Vector3(940, 140, 520),
-                scale: new THREE.Vector2(240, 210),
-            },
-            {
-                color: "rgba(176, 224, 255, 0.44)",
-                haloColor: "rgba(210, 160, 255, 0.24)",
-                position: new THREE.Vector3(1720, 280, 420),
-                scale: new THREE.Vector2(270, 230),
-            },
-            {
-                color: "rgba(204, 158, 254, 0.42)",
-                haloColor: "rgba(166, 216, 255, 0.24)",
-                position: new THREE.Vector3(1620, 260, -520),
-                scale: new THREE.Vector2(260, 220),
-            },
-            {
-                color: "rgba(180, 228, 255, 0.38)",
-                haloColor: "rgba(212, 164, 255, 0.22)",
-                position: new THREE.Vector3(1380, 120, 40),
-                scale: new THREE.Vector2(230, 190),
-            },
-            {
-                color: "rgba(210, 164, 255, 0.38)",
-                haloColor: "rgba(170, 222, 255, 0.22)",
-                position: new THREE.Vector3(1840, 220, -980),
-                scale: new THREE.Vector2(240, 200),
-            },
-            {
-                color: "rgba(182, 230, 255, 0.34)",
-                haloColor: "rgba(214, 166, 255, 0.2)",
-                position: new THREE.Vector3(1280, 110, 620),
-                scale: new THREE.Vector2(210, 180),
-            },
-            {
-                color: "rgba(212, 168, 255, 0.34)",
-                haloColor: "rgba(172, 224, 255, 0.2)",
-                position: new THREE.Vector3(1500, 130, -760),
-                scale: new THREE.Vector2(210, 180),
-            },
-            {
-                color: "rgba(202, 158, 255, 0.42)",
-                haloColor: "rgba(168, 218, 255, 0.24)",
-                position: new THREE.Vector3(1180, 210, 20),
-                scale: new THREE.Vector2(250, 220),
-            },
-            {
-                color: "rgba(178, 226, 255, 0.34)",
-                haloColor: "rgba(212, 164, 255, 0.2)",
-                position: new THREE.Vector3(1520, 230, 520),
-                scale: new THREE.Vector2(220, 190),
-            },
-            {
-                color: "rgba(208, 162, 255, 0.38)",
-                haloColor: "rgba(170, 220, 255, 0.22)",
-                position: new THREE.Vector3(1700, 300, -180),
-                scale: new THREE.Vector2(240, 200),
-            },
-            {
-                color: "rgba(180, 228, 255, 0.34)",
-                haloColor: "rgba(214, 168, 255, 0.2)",
-                position: new THREE.Vector3(1820, 320, 880),
-                scale: new THREE.Vector2(220, 190),
-            },
-        ];
+        const rgbaFromColor = (hex: number, alpha: number, brighten: number) => {
+            let sourceColor = new THREE.Color(hex).lerp(new THREE.Color(0xffffff), brighten);
+            let red = Math.round(sourceColor.r * 255);
+            let green = Math.round(sourceColor.g * 255);
+            let blue = Math.round(sourceColor.b * 255);
+            return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+        };
+
+        let glowSpecs = expandedClusterSpecs.map(clusterSpec => ({
+            color: rgbaFromColor(clusterSpec.color, 0.28 + Math.random() * 0.16, 0.34),
+            haloColor: rgbaFromColor(clusterSpec.color, 0.14 + Math.random() * 0.1, 0.58),
+            position: clusterSpec.position.clone().add(new THREE.Vector3(
+                (Math.random() - 0.5) * 42,
+                (Math.random() - 0.5) * 28,
+                (Math.random() - 0.5) * 42,
+            )),
+            scale: new THREE.Vector2(
+                clusterSpec.scale * (9.2 + Math.random() * 3.4),
+                clusterSpec.scale * (7.6 + Math.random() * 2.8),
+            ),
+        }));
 
         for (let glowSpec of glowSpecs) {
             let glow = this.createGlowSprite(
@@ -465,11 +402,11 @@ export default class GameScene extends THREE.Scene {
             context.restore();
         };
 
-        drawNebulaPatch(330, 330, 160, haloColor, 0.56, -0.34);
-        drawNebulaPatch(560, 360, 190, color, 0.64, 0.2);
-        drawNebulaPatch(455, 580, 210, haloColor, 0.42, 0.58);
-        drawNebulaPatch(700, 600, 145, color, 0.42, -0.18);
-        drawNebulaPatch(265, 640, 125, "rgba(116, 188, 255, 0.42)", 0.34, 0.14);
+        drawNebulaPatch(330, 330, 180, haloColor, 0.62, -0.34);
+        drawNebulaPatch(560, 360, 205, color, 0.72, 0.2);
+        drawNebulaPatch(455, 580, 220, haloColor, 0.5, 0.58);
+        drawNebulaPatch(700, 600, 155, color, 0.48, -0.18);
+        drawNebulaPatch(265, 640, 135, "rgba(156, 214, 255, 0.56)", 0.42, 0.14);
 
         context.save();
         context.globalCompositeOperation = "lighter";
@@ -485,7 +422,7 @@ export default class GameScene extends THREE.Scene {
                 sparkleY,
                 sparkleRadius,
             );
-            sparkleGradient.addColorStop(0, "rgba(212, 236, 255, 0.5)");
+            sparkleGradient.addColorStop(0, "rgba(236, 244, 255, 0.72)");
             sparkleGradient.addColorStop(0.35, haloColor);
             sparkleGradient.addColorStop(1, "rgba(0, 0, 0, 0)");
             context.fillStyle = sparkleGradient;
@@ -516,14 +453,45 @@ export default class GameScene extends THREE.Scene {
         scale: number,
     ): THREE.Group {
         let cluster = new THREE.Group();
+        let pieces: Array<{
+            driftAmplitude: THREE.Vector3;
+            driftPhase: number;
+            driftSpeed: number;
+            mesh: THREE.Group;
+            origin: THREE.Vector3;
+            pulseAmplitude: number;
+            pulseSpeed: number;
+            rotationRate: THREE.Vector3;
+        }> = [];
 
-        for (let i = 0; i < pointCount; i++) {
-            let points = Array(Math.ceil(Math.random() * 5) + 6).fill(0)
-                .map(_ => randomVector().multiplyScalar(0.8 + Math.random() * 1.8));
+        let variant = Math.floor(Math.random() * 4);
+        let pieceCount = pointCount + Math.floor(Math.random() * 3);
+        let spreadX = scale * (2.2 + Math.random() * 1.8);
+        let spreadY = scale * (1.2 + Math.random() * 1.2);
+        let spreadZ = scale * (1.4 + Math.random() * 1.8);
+
+        for (let i = 0; i < pieceCount; i++) {
+            let hullPointCount = 5 + Math.floor(Math.random() * 5) + variant;
+            let points = Array(hullPointCount).fill(0)
+                .map(_ => {
+                    let point = randomVector();
+                    let localScaleX = 0.6 + Math.random() * (1.6 + variant * 0.22);
+                    let localScaleY = 0.45 + Math.random() * (1.2 + variant * 0.18);
+                    let localScaleZ = 0.3 + Math.random() * (1.4 + variant * 0.26);
+                    point.set(
+                        point.x * localScaleX,
+                        point.y * localScaleY,
+                        point.z * localScaleZ,
+                    );
+                    return point;
+                });
             let geometry = new ConvexGeometry(points);
 
+            let glowColor = new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.16);
+            let emissiveColor = new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.28);
+
             let solidMaterial = new THREE.MeshBasicMaterial({
-                color: color,
+                color: glowColor,
                 transparent: true,
                 opacity: opacity,
                 depthTest: false,
@@ -531,10 +499,10 @@ export default class GameScene extends THREE.Scene {
                 blending: THREE.AdditiveBlending,
             });
             let wireMaterial = new THREE.MeshBasicMaterial({
-                color: color,
+                color: emissiveColor,
                 wireframe: true,
                 transparent: true,
-                opacity: 0.86,
+                opacity: 0.92,
                 depthTest: false,
                 depthWrite: false,
             });
@@ -545,21 +513,42 @@ export default class GameScene extends THREE.Scene {
             piece.add(solidMesh);
             piece.add(wireMesh);
 
+            let ringAngle = Math.random() * Math.PI * 2;
+            let ringRadius = (0.28 + Math.random() * 0.72) * spreadX;
             piece.position.set(
-                (Math.random() - 0.5) * scale * 1.8,
-                (Math.random() - 0.5) * scale * 1.1,
-                (Math.random() - 0.5) * scale * 0.9,
+                Math.cos(ringAngle) * ringRadius,
+                (Math.random() - 0.5) * spreadY,
+                Math.sin(ringAngle) * spreadZ,
             );
             piece.rotation.set(
                 Math.random() * Math.PI,
                 Math.random() * Math.PI,
                 Math.random() * Math.PI,
             );
-            let pieceScale = 0.7 + Math.random() * 0.7;
+            let pieceScale = 0.48 + Math.random() * 0.92;
             piece.scale.setScalar(pieceScale);
             cluster.add(piece);
+            pieces.push({
+                driftAmplitude: new THREE.Vector3(
+                    10 + Math.random() * 20,
+                    6 + Math.random() * 12,
+                    8 + Math.random() * 18,
+                ),
+                driftPhase: Math.random() * Math.PI * 4,
+                driftSpeed: 0.00016 + Math.random() * 0.00046,
+                mesh: piece,
+                origin: piece.position.clone(),
+                pulseAmplitude: 0.04 + Math.random() * 0.06,
+                pulseSpeed: 0.00034 + Math.random() * 0.00048,
+                rotationRate: new THREE.Vector3(
+                    (Math.random() - 0.5) * 0.00066,
+                    (Math.random() - 0.5) * 0.00088,
+                    (Math.random() - 0.5) * 0.00056,
+                ),
+            });
         }
 
+        cluster.userData.pieces = pieces;
         return cluster;
     }
 
@@ -826,6 +815,20 @@ export default class GameScene extends THREE.Scene {
             cluster.mesh.rotateX(cluster.rotationRate.x * dt);
             cluster.mesh.rotateY(cluster.rotationRate.y * dt);
             cluster.mesh.rotateZ(cluster.rotationRate.z * dt);
+
+            for (let piece of cluster.pieces) {
+                piece.mesh.position.x = piece.origin.x +
+                    Math.sin(now * piece.driftSpeed + piece.driftPhase) * piece.driftAmplitude.x;
+                piece.mesh.position.y = piece.origin.y +
+                    Math.cos(now * piece.driftSpeed * 0.74 + piece.driftPhase * 1.24) * piece.driftAmplitude.y;
+                piece.mesh.position.z = piece.origin.z +
+                    Math.sin(now * piece.driftSpeed * 0.56 + piece.driftPhase * 0.68) * piece.driftAmplitude.z;
+                let pulse = 1 + Math.sin(now * piece.pulseSpeed + piece.driftPhase) * piece.pulseAmplitude;
+                piece.mesh.scale.setScalar(pulse);
+                piece.mesh.rotateX(piece.rotationRate.x * dt);
+                piece.mesh.rotateY(piece.rotationRate.y * dt);
+                piece.mesh.rotateZ(piece.rotationRate.z * dt);
+            }
         }
 
         for (let glow of this.nebulaGlows) {
