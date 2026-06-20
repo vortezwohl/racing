@@ -1281,13 +1281,80 @@ export default class GameScene extends THREE.Scene {
         let totalSpeed = firstSpeed + secondSpeed;
         let firstShare = totalSpeed > 0 ? secondSpeed / totalSpeed : 0.5;
         let secondShare = totalSpeed > 0 ? firstSpeed / totalSpeed : 0.5;
+        let firstForwardDot = Math.abs(normal.dot(first.direction.clone().normalize()));
+        let secondForwardDot = Math.abs(normal.dot(second.direction.clone().normalize()));
+        let isFrontBackCollision = Math.max(firstForwardDot, secondForwardDot) >=
+            raceCollision.frontBackThreshold;
 
-        first.position.add(normal.clone().multiplyScalar(separation * firstShare));
-        second.position.add(normal.clone().multiplyScalar(-separation * secondShare));
-        first.velocity.multiplyScalar(firstSpeed >= secondSpeed ? 0.82 : 0.65);
-        second.velocity.multiplyScalar(secondSpeed >= firstSpeed ? 0.82 : 0.65);
-        first.applyCollisionSlow(raceCollision.slowDurationMs);
-        second.applyCollisionSlow(raceCollision.slowDurationMs);
+        if (isFrontBackCollision) {
+            first.position.add(normal.clone().multiplyScalar(separation * firstShare));
+            second.position.add(normal.clone().multiplyScalar(-separation * secondShare));
+            let relativeSpeed = first.velocity.clone().sub(second.velocity).dot(normal);
+            let reboundMagnitude = Math.max(
+                Math.abs(relativeSpeed) * 0.5,
+                raceCollision.frontBackReboundBase,
+            );
+            let firstIsFront = first.position.clone().sub(second.position)
+                .dot(first.direction.clone().normalize()) > 0;
+            let frontVehicle = firstIsFront ? first : second;
+            let rearVehicle = firstIsFront ? second : first;
+            let frontPushDirection = frontVehicle.position.clone()
+                .sub(rearVehicle.position)
+                .normalize();
+            if (frontPushDirection.lengthSq() < 0.0001)
+                frontPushDirection.copy(frontVehicle.direction).normalize();
+            let rearPushDirection = frontPushDirection.clone().negate();
+
+            frontVehicle.velocity.add(
+                frontPushDirection.multiplyScalar(
+                    reboundMagnitude * raceCollision.frontBackReboundFrontScale,
+                ),
+            );
+            rearVehicle.velocity.add(
+                rearPushDirection.multiplyScalar(
+                    reboundMagnitude * raceCollision.frontBackReboundRearScale,
+                ),
+            );
+        } else {
+            let speedGap = Math.min(
+                Math.abs(firstSpeed - secondSpeed) *
+                raceCollision.sideImpactSpeedBiasScale,
+                raceCollision.sideImpactSpeedBiasCap,
+            );
+            let firstIsSlower = firstSpeed <= secondSpeed;
+            let slowerVehicle = firstIsSlower ? first : second;
+            let fasterVehicle = firstIsSlower ? second : first;
+            let slowerShare = Math.min(
+                (firstIsSlower ? firstShare : secondShare) + speedGap,
+                0.92,
+            );
+            let fasterShare = Math.max(1 - slowerShare, 0.08);
+
+            slowerVehicle.position.add(
+                normal.clone().multiplyScalar(
+                    slowerVehicle === first ? separation * slowerShare : -separation * slowerShare,
+                ),
+            );
+            fasterVehicle.position.add(
+                normal.clone().multiplyScalar(
+                    fasterVehicle === first ? separation * fasterShare : -separation * fasterShare,
+                ),
+            );
+
+            first.velocity.multiplyScalar(
+                firstIsSlower ?
+                    raceCollision.sideImpactSlowSlowScale :
+                    raceCollision.sideImpactSlowFastScale,
+            );
+            second.velocity.multiplyScalar(
+                firstIsSlower ?
+                    raceCollision.sideImpactSlowFastScale :
+                    raceCollision.sideImpactSlowSlowScale,
+            );
+            first.applyCollisionSlow(raceCollision.slowDurationMs);
+            second.applyCollisionSlow(raceCollision.slowDurationMs);
+        }
+
         first.syncTransform();
         second.syncTransform();
     }

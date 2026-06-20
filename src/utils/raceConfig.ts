@@ -5,10 +5,10 @@ const racePerformance = {
     collisionSlowScale: 0.62,
     deceleration: 0.00055,
     defaultGravity: new THREE.Vector3(0, -0.01, 0),
-    draftAccelerationBonus: 0.45,
+    draftAccelerationBonus: 0.5,
     draftChargeDecayPerMs: 0.00045,
     draftChargeGainPerMs: 0.0007,
-    draftMaxSpeedBonus: 0.24,
+    draftMaxSpeedBonus: 0.25,
     friction: 0.98,
     maxRoll: 0.36,
     maxSpeed: 0.9,
@@ -16,7 +16,7 @@ const racePerformance = {
 };
 
 const raceCamera = {
-    draftFovBonus: 6,
+    draftFovBonus: 8,
     highSpeedFov: 94,
     lowSpeedFov: 64,
     maxFov: 100,
@@ -57,7 +57,15 @@ const raceTrail = {
 };
 
 const raceCollision = {
+    frontBackReboundBase: 0.16,
+    frontBackReboundFrontScale: 1.15,
+    frontBackReboundRearScale: 1.0,
+    frontBackThreshold: 0.72,
     pushStrength: 0.16,
+    sideImpactSlowFastScale: 0.82,
+    sideImpactSlowSlowScale: 0.55,
+    sideImpactSpeedBiasCap: 0.35,
+    sideImpactSpeedBiasScale: 0.45,
     slowDurationMs: 450,
 };
 
