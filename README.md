@@ -11,8 +11,6 @@ Move forward      | <kbd>w</kbd>
 Move backward     | <kbd>s</kbd> / <kbd>shift</kbd>
 Turn left         | <kbd>a</kbd>
 Turn right        | <kbd>d</kbd>
-Increase thrust   | <kbd>↑</kbd> / 🖱️ scroll up             
-Decrease thrust   | <kbd>↓</kbd> / 🖱️ scroll down
 Reverse camera    | <kbd>r</kbd>    
 
 ## Speedrun "Tech"

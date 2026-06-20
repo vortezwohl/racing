@@ -71,33 +71,7 @@ export default class Player extends Vehicle {
         super.handleTrackCollision(track, true);
     }
 
-    updateGaugeFill() {
-        let gaugeFill = document.getElementById("gauge-fill");
-        let gaugeHeight = this.thrust * 40;
-        gaugeFill.style.top = `${40 - gaugeHeight}vh`;
-        gaugeFill.style.height = `${gaugeHeight}vh`;
-
-        // create a gradient from green to yellow to red based on thrust
-        // clamp values between #4bff00 and #ff4b00
-        let red = this.thrust >= 0.5 ? 255 : Math.floor(this.thrust * 2 * 180) + 75;
-        let green = this.thrust <= 0.5 ? 255 : Math.floor((1 - this.thrust) * 2 * 180) + 75;
-        gaugeFill.style.backgroundColor = `#${red.toString(16)}${green.toString(16)}00`;
-    }
-
     handleInput(keysPressed: Controls, dt: number) {
-        // thrust determines the extent of acceleration
-        if (keysPressed["arrowup"])
-            this.thrust = Math.min(this.thrust + 0.02, 1);
-        
-        if (keysPressed["arrowdown"])
-            this.thrust = Math.max(this.thrust - 0.02, 0);
-        
-        if (keysPressed["arrowup"] || keysPressed["arrowdown"]) {
-            this.updateGaugeFill();
-            keysPressed["arrowup"] = false;
-            keysPressed["arrowdown"] = false;   
-        }
-
         // acceleration
         if (keysPressed["w"])
             this.velocity.add(this.direction.clone()
@@ -130,7 +104,6 @@ export default class Player extends Vehicle {
             return;
 
         super.handleOutOfBounds(true);
-        this.updateGaugeFill();
     }
 
     update(track: Track, dt?: number, keysPressed?: Controls) {

@@ -55,7 +55,7 @@ export default class Vehicle {
         this.rotation = rotation;
         this.gravity = this.defaultGravity;
         this.velocity = new THREE.Vector3(0, 0, 0);
-        this.thrust = 0;
+        this.thrust = 1;
 
         this.width = vehicleData.width;
         this.height = vehicleData.height;
@@ -309,7 +309,7 @@ export default class Vehicle {
         this.rotation = checkpoint.resetRotation.clone();
         
         this.velocity = new THREE.Vector3(0, 0, 0);
-        this.thrust = 0;
+        this.thrust = 1;
         this.model.position.set(this.position.x, this.position.y, this.position.z);
         this.hitbox.position.set(this.position.x, this.position.y, this.position.z);
         this.model.setRotationFromEuler(this.rotation.clone());

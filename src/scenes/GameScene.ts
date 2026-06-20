@@ -662,10 +662,6 @@ export default class GameScene extends THREE.Scene {
             this.keysPressed[e.key.toLowerCase()] = false;
         });
 
-        window.addEventListener("wheel", (e: WheelEvent) => {
-            this.keysPressed[`arrow${e.deltaY < 0 ? "up" : "down"}`] = true;
-        });
-
         // hide joystick if not touch device
         if (!isTouchDevice) {
             document.getElementById("joystick").style.display = "none";
@@ -683,7 +679,7 @@ export default class GameScene extends THREE.Scene {
         let y0 = 50 * vh + joystickRadius;
         
         // keep track of all keys so they can be reset in the touch handler
-        let controlKeys = ["w", "a", "s", "d", "shift", "arrowup", "arrowdown"];
+        let controlKeys = ["w", "a", "s", "d", "shift"];
         
         let knob = document.getElementById("knob");
         knob.addEventListener("touchmove", (e: TouchEvent) => {
@@ -731,19 +727,6 @@ export default class GameScene extends THREE.Scene {
             document.getElementById("knob").style.left = "5vw";
         }, false);
         
-
-        // set up touch thrust gauge
-        let gauge = document.getElementById("gauge");
-        let gaugeFill = document.getElementById("gauge-fill");
-        gauge.addEventListener("touchmove", (e: TouchEvent) => {
-            e.preventDefault();
-
-            let gaugeTouch = e.targetTouches[0];
-
-            let currentHeight = 50 * vh + parseInt(gaugeFill.style.top) * vh;
-            let direction = gaugeTouch.clientY <= currentHeight ? "up" : "down";
-            this.keysPressed[`arrow${direction}`] = true;
-        });
     }
 
     handleCountdown() {
@@ -772,7 +755,7 @@ export default class GameScene extends THREE.Scene {
             if (cpu.laps > 2)
             rank++;
             
-            ["dashboard", "joystick", "gauge"].forEach((id: string) => {
+            ["dashboard", "joystick"].forEach((id: string) => {
                 document.getElementById(id).style.display = "none";
             });
             
