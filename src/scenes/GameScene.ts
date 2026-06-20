@@ -17,9 +17,6 @@ import {
 } from "../utils/raceConfig";
 import { tracks } from "../../data/tracks/tracks";
 import {
-    speeders,
-    bike,
-    mustang,
     menuVehicles,
     MenuVehicle,
 } from "../../data/vehicles/vehicles";
@@ -84,6 +81,19 @@ type RaceVehicleState = {
     trailPositions: Array<THREE.Vector3>;
     vehicle: Vehicle;
     wobblePhase: number;
+};
+
+type StartGridSlot = {
+    position: THREE.Vector3;
+    rotation: THREE.Euler;
+};
+
+const raceStartGrid = {
+    backRowOffsets: [-1, 0, 1],
+    frontRowOffsets: [-0.5, 0.5],
+    rowPadding: 1.8,
+    sidePadding: 1.4,
+    totalVehicles: 5,
 };
 
 export default class GameScene extends THREE.Scene {
@@ -647,6 +657,84 @@ export default class GameScene extends THREE.Scene {
         return cluster;
     }
 
+    shuffleItems<T>(items: Array<T>): Array<T> {
+        let shuffled = items.slice();
+        for (let i = shuffled.length - 1; i > 0; i--) {
+            let randomIndex = Math.floor(Math.random() * (i + 1));
+            let currentItem = shuffled[i];
+            shuffled[i] = shuffled[randomIndex];
+            shuffled[randomIndex] = currentItem;
+        }
+        return shuffled;
+    }
+
+    getPlayerMenuVehicle(speederIndex: number): MenuVehicle {
+        let normalizedIndex = Number.isNaN(speederIndex) ? 0 : speederIndex;
+        return menuVehicles.find(vehicle => vehicle.playableIndex === normalizedIndex) ||
+            menuVehicles[0];
+    }
+
+    buildNpcMenuVehicles(playerMenuVehicle: MenuVehicle): Array<MenuVehicle> {
+        let targetNpcCount = raceStartGrid.totalVehicles - 1;
+        let availableUniqueVehicles = this.shuffleItems(
+            menuVehicles.filter(vehicle => vehicle.playableIndex !== playerMenuVehicle.playableIndex),
+        );
+        let npcVehicles = availableUniqueVehicles.slice(0, targetNpcCount);
+
+        while (npcVehicles.length < targetNpcCount) {
+            let duplicatePool = this.shuffleItems(menuVehicles);
+            let nextVehicle = duplicatePool[(npcVehicles.length - availableUniqueVehicles.length) % duplicatePool.length];
+            npcVehicles.push(nextVehicle);
+        }
+
+        return npcVehicles;
+    }
+
+    createStartGridSlots(participants: Array<MenuVehicle>): Array<StartGridSlot> {
+        let maxVehicleWidth = participants.reduce((largestWidth, participant) =>
+            Math.max(largestWidth, participant.data.width), 0);
+        let maxVehicleLength = participants.reduce((largestLength, participant) =>
+            Math.max(largestLength, participant.data.length), 0);
+        let rowSpacing = maxVehicleLength + raceStartGrid.rowPadding;
+        let lateralSpacing = maxVehicleWidth + raceStartGrid.sidePadding;
+        let startDirection = this.track.startDirection.clone().normalize();
+        let lateralDirection = new THREE.Vector3().crossVectors(
+            new THREE.Vector3(0, 1, 0),
+            startDirection,
+        );
+        if (lateralDirection.lengthSq() < 0.0001)
+            lateralDirection.set(1, 0, 0);
+        else
+            lateralDirection.normalize();
+
+        let frontRowBase = this.track.startPoint.clone();
+        let backRowBase = frontRowBase.clone().add(
+            startDirection.clone().multiplyScalar(-rowSpacing),
+        );
+        let rotation = this.track.startRotation.clone();
+        let slots: Array<StartGridSlot> = [];
+
+        for (let offset of raceStartGrid.frontRowOffsets) {
+            slots.push({
+                position: frontRowBase.clone().add(
+                    lateralDirection.clone().multiplyScalar(offset * lateralSpacing),
+                ),
+                rotation: rotation.clone(),
+            });
+        }
+
+        for (let offset of raceStartGrid.backRowOffsets) {
+            slots.push({
+                position: backRowBase.clone().add(
+                    lateralDirection.clone().multiplyScalar(offset * lateralSpacing),
+                ),
+                rotation: rotation.clone(),
+            });
+        }
+
+        return slots;
+    }
+
     render(speederIndex: number, debug?: boolean) {
         // set up camera
         this.camera = new THREE.PerspectiveCamera(80, 
@@ -690,38 +778,31 @@ export default class GameScene extends THREE.Scene {
 
         if (!trackData.gridColor)
             this.setupBackgroundEntities();
-        
-        if (isNaN(speederIndex))
-            speederIndex = 0;
 
-        let playerVehicleData = speederIndex == 3 ? bike : speederIndex == 4 ? mustang : 
-            speederIndex > 4 || speederIndex < 0 ? speeders[0] : speeders[speederIndex];
+        let playerMenuVehicle = this.getPlayerMenuVehicle(speederIndex);
+        let npcMenuVehicles = this.buildNpcMenuVehicles(playerMenuVehicle);
+        let participantVehicles = [playerMenuVehicle, ...npcMenuVehicles];
+        let startGridSlots = this.shuffleItems(
+            this.createStartGridSlots(participantVehicles),
+        );
 
-        this.player = new Player(this, this.camera, playerVehicleData, 
-            this.track.startPoint.clone(), this.track.startDirection.clone(), 
-            this.track.startRotation.clone(), firstCheckpoint, debug, this.orbitals);
+        this.player = new Player(this, this.camera, playerMenuVehicle.data,
+            startGridSlots[0].position.clone(), this.track.startDirection.clone(),
+            startGridSlots[0].rotation.clone(), firstCheckpoint, debug, this.orbitals);
         this.player.handleCameraMovement(true, true);
 
         this.npcs = [];
-        this.npcMenuVehicles = [];
-        let offset = 4;
+        this.npcMenuVehicles = npcMenuVehicles;
 
-        for (let i = 0; i < 3; i++) {
-            if (i == speederIndex || this.npcs.length == 3)
-                continue;
-
-            let startPoint = new THREE.Vector3(this.track.startPoint.x, 
-                this.track.startPoint.y, this.track.startPoint.z + offset);
-
-            this.npcs.push(new NPC(this, speeders[i], startPoint,
-                this.track.startDirection.clone(), 
-                this.track.startRotation.clone(), firstCheckpoint, debug));
-            this.npcMenuVehicles.push(menuVehicles[i]);
-
-            offset *= -1;
+        for (let i = 0; i < this.npcMenuVehicles.length; i++) {
+            let startGridSlot = startGridSlots[i + 1];
+            let npcMenuVehicle = this.npcMenuVehicles[i];
+            this.npcs.push(new NPC(this, npcMenuVehicle.data, startGridSlot.position.clone(),
+                this.track.startDirection.clone(),
+                startGridSlot.rotation.clone(), firstCheckpoint, debug));
         }
 
-        this.setupRaceVehicleStates(speederIndex);
+        this.setupRaceVehicleStates(playerMenuVehicle);
 
         if (debug) {
             // set up debugger
@@ -913,12 +994,8 @@ export default class GameScene extends THREE.Scene {
         return raceTrail.maxMarkerOpacity;
     }
 
-    setupRaceVehicleStates(speederIndex: number) {
+    setupRaceVehicleStates(playerMenuVehicle: MenuVehicle) {
         this.clearRaceIdentityMarkers();
-
-        let playerMenuVehicle = menuVehicles.find(vehicle =>
-            vehicle.playableIndex === speederIndex
-        ) || menuVehicles[0];
         let states: Array<RaceVehicleState> = [
             {
                 displayName: playerMenuVehicle.label,
