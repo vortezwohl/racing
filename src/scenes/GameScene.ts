@@ -9,6 +9,11 @@ import { NPC, Player, Track, Vehicle } from "../objects/objects";
 import { Satellite } from "../decorations/decorations";
 import { randomVector } from "../utils/geometry";
 import { Controls, GameSceneOptions, RaceUi } from "../utils/interfaces";
+import RaceHud, {
+    RaceHudAction,
+    RaceHudLeaderboardEntry,
+    RaceHudState,
+} from "../ui/RaceHud";
 import {
     raceCollision,
     raceIdentityColors,
@@ -85,6 +90,7 @@ type RaceVehicleState = {
     identityColor: number;
     isLocalPlayer: boolean;
     markerElements?: RaceMarkerElements;
+    progressIndex: number;
     trailPositions: Array<THREE.Vector3>;
     vehicle: Vehicle;
     wobblePhase: number;
@@ -93,6 +99,12 @@ type RaceVehicleState = {
 type StartGridSlot = {
     position: THREE.Vector3;
     rotation: THREE.Euler;
+};
+
+type RaceStanding = {
+    finishTimeMs?: number;
+    progressScore: number;
+    state: RaceVehicleState;
 };
 
 const raceStartGrid = {
@@ -136,14 +148,28 @@ export default class GameScene extends THREE.Scene {
     fadeInTimeout?: number;
     finished: boolean;
     finishPreview: boolean;
-    finishScreenTimeout?: number;
     handleKeyDownBound: (e: KeyboardEvent) => void;
+    handlePointerDownBound: (e: PointerEvent) => void;
     handleKeyUpBound: (e: KeyboardEvent) => void;
     handleResizeBound: () => void;
     handleKnobTouchEndBound?: () => void;
     handleKnobTouchMoveBound?: (e: TouchEvent) => void;
 
     debugState: RaceDebugState;
+    finishTimes: Map<string, number>;
+    hud: RaceHud;
+    hudState: RaceHudState;
+    isTouchDevice: boolean;
+    lastCountdownText: string;
+    lastPlayerLap: number;
+    onExitToMenu?: () => void;
+    onRestartRace?: () => void;
+    playerAverageSpeedDistance: number;
+    playerAverageSpeedSampleMs: number;
+    playerFinishRank?: number;
+    playerFinishTimeMs?: number;
+    playerLapStartTimeMs: number;
+    playerLapTimesMs: Array<number>;
     sounds: { [key: string]: HTMLAudioElement };
     ui: RaceUi;
 
@@ -155,10 +181,25 @@ export default class GameScene extends THREE.Scene {
         this.debugMode = !!options.debug;
         this.ui = options.ui;
         this.userData.raceUi = this.ui;
+        this.userData.onVehicleLapAdvance = (vehicle: Vehicle, laps: number) => {
+            this.handleVehicleLapAdvance(vehicle, laps);
+        };
         this.width = window.innerWidth;
         this.height = window.innerHeight;
         this.floatingClusters = [];
+        this.finishTimes = new Map();
+        this.hud = new RaceHud(this.ui.hudCanvas);
+        this.hudState = this.hud.createDefaultState();
+        this.isTouchDevice = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+        this.lastCountdownText = "";
+        this.lastPlayerLap = 1;
         this.nebulaGlows = [];
+        this.onExitToMenu = options.onExitToMenu;
+        this.onRestartRace = options.onRestartRace;
+        this.playerAverageSpeedDistance = 0;
+        this.playerAverageSpeedSampleMs = 0;
+        this.playerLapStartTimeMs = 0;
+        this.playerLapTimesMs = [];
         this.raceVehicleStates = [];
         this.draftRelations = [];
         this.npcMenuVehicles = [];
@@ -176,15 +217,19 @@ export default class GameScene extends THREE.Scene {
             this.camera.updateProjectionMatrix();
             this.renderer.setSize(this.width, this.height);
             this.filter.setSize(this.width, this.height);
+            this.hud.resize(this.width, this.height);
+            this.renderHud();
+        };
+        this.handlePointerDownBound = (e: PointerEvent) => {
+            this.handlePointerDown(e);
         };
 
         this.render(options.speederIndex, options.debug);
 
         // set up utilities
         // set up controls
-        let isTouchDevice = "ontouchstart" in window || 
-            navigator.maxTouchPoints > 0;
-        this.setupControls(isTouchDevice);
+        this.setupControls(this.isTouchDevice);
+        this.hud.resize(this.width, this.height);
 
         this.countdown = 0;
         this.finished = false;
@@ -196,20 +241,28 @@ export default class GameScene extends THREE.Scene {
         this.sounds = {
             "countdown": new Audio("./assets/sounds/countdown.wav"),
             "countdown-start": new Audio("./assets/sounds/countdown-start.wav")
-        }
+        };
+
+        this.resetUi();
     }
 
     resetUi() {
-        this.ui.counter.innerHTML = "Lap 1/2";
-        this.ui.countdown.innerHTML = "";
-        this.ui.timer.innerHTML = "00:00:00";
-        this.ui.dashboard.style.display = "block";
-        this.ui.finishScreen.style.display = "none";
-        this.ui.finishScreen.style.opacity = "0";
-        this.ui.finishRank.innerHTML = "";
-        this.ui.finishRankSuffix.innerHTML = "";
-        this.ui.finishTime.innerHTML = "";
-        this.ui.joystick.style.display = "none";
+        this.countdown = 0;
+        this.finished = false;
+        this.finishTimes.clear();
+        this.hudState = this.hud.createDefaultState();
+        this.hudState.totalVehicles = raceStartGrid.totalVehicles;
+        this.userData.totalLaps = this.hudState.totalLaps;
+        this.lastCountdownText = "";
+        this.lastPlayerLap = 1;
+        this.playerAverageSpeedDistance = 0;
+        this.playerAverageSpeedSampleMs = 0;
+        this.playerFinishRank = undefined;
+        this.playerFinishTimeMs = undefined;
+        this.playerLapStartTimeMs = 0;
+        this.playerLapTimesMs = [];
+        this.track.elapsedTime = 0;
+        this.updateJoystickVisibility();
         this.debugState.finishHandledAt = undefined;
         this.debugState.finishPanelVisibleAt = undefined;
         this.debugState.laps = 1;
@@ -222,6 +275,7 @@ export default class GameScene extends THREE.Scene {
         this.ui.curtain.style.height = "100vh";
         this.ui.knob.style.top = "5vw";
         this.ui.knob.style.left = "5vw";
+        this.renderHud();
     }
 
     setupBackgroundEntities(number: number = 5000, 
@@ -744,6 +798,261 @@ export default class GameScene extends THREE.Scene {
         return slots;
     }
 
+    formatTimeMs(timeMs: number): string {
+        let safeTimeMs = Math.max(0, timeMs);
+        let minutes = safeTimeMs / 60000;
+        let seconds = (safeTimeMs % 60000) / 1000;
+        let centiseconds = (safeTimeMs / 10) % 100;
+
+        return [minutes, seconds, centiseconds]
+            .map(unit => Math.floor(unit).toString().padStart(2, "0"))
+            .join(":");
+    }
+
+    getDisplaySpeedKmh(vehicle: Vehicle): number {
+        return Math.round(THREE.MathUtils.lerp(0, 420, vehicle.getSpeedRatio()));
+    }
+
+    getCountdownText(): string {
+        if (this.countdown < 3000 || this.countdown > 7000)
+            return "";
+
+        return this.countdown < 6000 ?
+            Math.ceil((6000 - this.countdown) / 1000).toString() :
+            "GO!";
+    }
+
+    updateJoystickVisibility() {
+        this.ui.joystick.style.display = this.isTouchDevice && !this.finished ? "block" : "none";
+    }
+
+    handlePointerDown(event: PointerEvent) {
+        if (!this.active)
+            return;
+
+        let action = this.hud.hitTest(event.clientX, event.clientY);
+        if (!action) {
+            if (this.hudState.showSettings &&
+                !this.hud.isPointInsideModal(event.clientX, event.clientY)) {
+                this.hudState.showSettings = false;
+                this.renderHud();
+            }
+            return;
+        }
+
+        this.handleHudAction(action);
+    }
+
+    handleHudAction(action: RaceHudAction) {
+        switch (action) {
+            case "toggle-settings":
+                this.hudState.gearPressedUntilMs = performance.now() + 140;
+                this.hudState.showSettings = !this.hudState.showSettings;
+                this.renderHud();
+                return;
+            case "settings-resume":
+                this.hudState.showSettings = false;
+                this.renderHud();
+                return;
+            case "settings-exit":
+            case "results-back":
+                this.hudState.showSettings = false;
+                this.onExitToMenu?.();
+                return;
+            case "settings-restart":
+            case "results-retry":
+                this.hudState.showSettings = false;
+                this.onRestartRace?.();
+                return;
+            default:
+                return;
+        }
+    }
+
+    syncCountdownState() {
+        let countdownText = this.getCountdownText();
+        if (countdownText && countdownText !== this.lastCountdownText) {
+            let sound = `countdown${countdownText === "GO!" ? "-start" : ""}`;
+            this.sounds[sound]?.play();
+        }
+
+        this.lastCountdownText = countdownText;
+        this.hudState.countdownText = countdownText;
+    }
+
+    recordPlayerTelemetry(dt: number) {
+        if (this.finished || this.countdown < 6000)
+            return;
+
+        this.playerAverageSpeedDistance += this.getDisplaySpeedKmh(this.player) * dt;
+        this.playerAverageSpeedSampleMs += dt;
+    }
+
+    getAverageSpeedKmh(): number {
+        if (this.playerAverageSpeedSampleMs <= 0)
+            return 0;
+
+        return Math.round(this.playerAverageSpeedDistance / this.playerAverageSpeedSampleMs);
+    }
+
+    findNearestTrackIndex(position: THREE.Vector3, previousIndex: number = 0): number {
+        if (!this.track.pathPoints.length)
+            return 0;
+
+        let nearestDistance = Infinity;
+        let nearestIndex = previousIndex % this.track.pathPoints.length;
+        let searchCount = Math.min(this.track.pathPoints.length, 80);
+
+        for (let offset = 0; offset < searchCount; offset++) {
+            let index = (nearestIndex + offset) % this.track.pathPoints.length;
+            let distance = position.distanceToSquared(this.track.pathPoints[index]);
+            if (distance < nearestDistance) {
+                nearestDistance = distance;
+                nearestIndex = index;
+            }
+        }
+
+        if (nearestDistance > 196) {
+            for (let index = 0; index < this.track.pathPoints.length; index++) {
+                let distance = position.distanceToSquared(this.track.pathPoints[index]);
+                if (distance < nearestDistance) {
+                    nearestDistance = distance;
+                    nearestIndex = index;
+                }
+            }
+        }
+
+        return nearestIndex;
+    }
+
+    getVehicleProgressScore(state: RaceVehicleState): number {
+        if (state.isLocalPlayer) {
+            state.progressIndex = this.findNearestTrackIndex(
+                state.vehicle.position,
+                state.progressIndex,
+            );
+        } else {
+            let npc = state.vehicle as NPC;
+            state.progressIndex = Number.isFinite(npc.pathPointIndex) ?
+                npc.pathPointIndex :
+                this.findNearestTrackIndex(state.vehicle.position, state.progressIndex);
+        }
+
+        return (state.vehicle.laps - 1) * this.track.pathPoints.length + state.progressIndex;
+    }
+
+    buildStandings(): Array<RaceStanding> {
+        return this.raceVehicleStates
+            .map(state => ({
+                finishTimeMs: this.finishTimes.get(state.id),
+                progressScore: this.getVehicleProgressScore(state),
+                state,
+            }))
+            .sort((first, second) => {
+                if (first.finishTimeMs !== undefined && second.finishTimeMs !== undefined)
+                    return first.finishTimeMs - second.finishTimeMs;
+
+                if (first.finishTimeMs !== undefined)
+                    return -1;
+
+                if (second.finishTimeMs !== undefined)
+                    return 1;
+
+                return second.progressScore - first.progressScore;
+            });
+    }
+
+    getPlayerStandingPosition(): number {
+        let standings = this.buildStandings();
+        let playerIndex = standings.findIndex(standing => standing.state.isLocalPlayer);
+        return playerIndex >= 0 ? playerIndex + 1 : 1;
+    }
+
+    buildLeaderboardEntries(): Array<RaceHudLeaderboardEntry> {
+        return this.buildStandings().map((standing, index) => {
+            let finishTimeMs = this.finishTimes.get(standing.state.id);
+            return {
+                color: this.colorToCss(standing.state.identityColor),
+                id: standing.state.id,
+                isPlayer: standing.state.isLocalPlayer,
+                label: standing.state.displayName,
+                place: index + 1,
+                statusText: finishTimeMs !== undefined ? "FINISHED" : "RACING",
+                timeText: finishTimeMs !== undefined ?
+                    this.formatTimeMs(finishTimeMs) :
+                    `LAP ${Math.min(standing.state.vehicle.laps, this.hudState.totalLaps)}/${this.hudState.totalLaps}`,
+            };
+        });
+    }
+
+    captureNpcFinishers() {
+        for (let index = 0; index < this.npcs.length; index++) {
+            let npc = this.npcs[index];
+            let state = this.raceVehicleStates[index + 1];
+            if (!state || npc.laps <= this.hudState.totalLaps || this.finishTimes.has(state.id))
+                continue;
+
+            this.finishTimes.set(state.id, this.track.elapsedTime);
+        }
+    }
+
+    handleVehicleLapAdvance(vehicle: Vehicle, laps: number) {
+        if (vehicle === this.player) {
+            this.capturePlayerLapProgress();
+            this.debugState.laps = laps;
+            document.body.dataset.playerLaps = laps.toString();
+            if (laps > this.hudState.totalLaps)
+                this.handleRaceFinish();
+            return;
+        }
+
+        let standing = this.raceVehicleStates.find(state => state.vehicle === vehicle);
+        if (!standing || laps <= this.hudState.totalLaps || this.finishTimes.has(standing.id))
+            return;
+
+        this.finishTimes.set(standing.id, this.track.elapsedTime);
+    }
+
+    capturePlayerLapProgress() {
+        if (this.player.laps <= this.lastPlayerLap)
+            return;
+
+        for (let lap = this.lastPlayerLap + 1; lap <= this.player.laps; lap++) {
+            let splitTime = Math.max(0, this.track.elapsedTime - this.playerLapStartTimeMs);
+            this.playerLapTimesMs.push(splitTime);
+            this.playerLapStartTimeMs = this.track.elapsedTime;
+        }
+
+        this.lastPlayerLap = this.player.laps;
+    }
+
+    updateHudState() {
+        let finishTimeMs = this.playerFinishTimeMs ?? this.track.elapsedTime;
+        this.hudState.averageSpeedKmh = this.getAverageSpeedKmh();
+        this.hudState.currentLap = Math.min(this.player.laps, this.hudState.totalLaps);
+        this.hudState.finishTimeText = this.formatTimeMs(finishTimeMs);
+        this.hudState.lapTimes = this.playerLapTimesMs.map(timeMs => this.formatTimeMs(timeMs));
+        this.hudState.leaderboardEntries = this.buildLeaderboardEntries();
+        if (this.finished && !this.playerFinishRank)
+            this.playerFinishRank = this.getPlayerStandingPosition();
+        this.hudState.position = this.finished && this.playerFinishRank ?
+            this.playerFinishRank :
+            this.getPlayerStandingPosition();
+        this.hudState.resultsSubtitle = this.finished && this.playerFinishRank ?
+            `FINAL POSITION #${this.playerFinishRank}` :
+            "TRACKING FINISHERS";
+        this.hudState.speedKmh = this.getDisplaySpeedKmh(this.player);
+        this.hudState.timerText = this.finished && this.playerFinishTimeMs !== undefined ?
+            this.formatTimeMs(this.playerFinishTimeMs) :
+            this.track.getTimeString();
+        this.hudState.totalVehicles = this.raceVehicleStates.length || raceStartGrid.totalVehicles;
+    }
+
+    renderHud() {
+        this.hud.setState(this.hudState);
+        this.hud.render();
+    }
+
     render(speederIndex: number, debug?: boolean) {
         // set up camera
         this.camera = new THREE.PerspectiveCamera(80, 
@@ -1014,6 +1323,7 @@ export default class GameScene extends THREE.Scene {
                 identityColor: raceIdentityColors[0],
                 isLocalPlayer: true,
                 markerElements: undefined,
+                progressIndex: 0,
                 trailPositions: [],
                 vehicle: this.player,
             },
@@ -1031,6 +1341,7 @@ export default class GameScene extends THREE.Scene {
                 identityColor,
                 isLocalPlayer: false,
                 markerElements: this.createRaceMarker(menuVehicle.label, identityColor),
+                progressIndex: 0,
                 trailPositions: [],
                 vehicle: this.npcs[i],
             });
@@ -1470,10 +1781,14 @@ export default class GameScene extends THREE.Scene {
     }
 
     handleVehicleCollisions() {
-        for (let i = 0; i < this.raceVehicleStates.length; i++) {
-            for (let j = i + 1; j < this.raceVehicleStates.length; j++) {
-                let first = this.raceVehicleStates[i].vehicle;
-                let second = this.raceVehicleStates[j].vehicle;
+        let collisionStates = this.finished ?
+            this.raceVehicleStates.filter(state => !state.isLocalPlayer) :
+            this.raceVehicleStates;
+
+        for (let i = 0; i < collisionStates.length; i++) {
+            for (let j = i + 1; j < collisionStates.length; j++) {
+                let first = collisionStates[i].vehicle;
+                let second = collisionStates[j].vehicle;
                 if (!first.hitbox || !second.hitbox)
                     continue;
 
@@ -1555,66 +1870,30 @@ export default class GameScene extends THREE.Scene {
         
     }
 
-    handleCountdown() {
-        let countdown = this.ui.countdown;
-        if (this.countdown < 3000 || this.countdown > 7000)
-            return countdown.innerHTML = "";
-
-        let countDownText = this.countdown < 6000 ? 
-            Math.ceil((6000 - this.countdown) / 1000).toString() : "GO!";
-        
-        if (countdown.innerHTML != countDownText) {
-            let sound = "countdown" + (countDownText == "GO!" ? "-start" : "");
-            this.sounds[sound].play();
-            countdown.innerHTML = this.countdown < 6000 ? 
-                Math.ceil((6000 - this.countdown) / 1000).toString() : "GO!";
-        }
-        
-    }
-
     handleRaceFinish() {
-        if (!this.finished) {
-            this.ui.curtain.classList.add("long-fade-to-black");
-            this.debugState.finishHandledAt = performance.now();
-            this.debugState.laps = this.player.laps;
-            document.body.dataset.raceFinished = "true";
-            document.body.dataset.playerLaps = this.player.laps.toString();
-            console.info("[finish] handleRaceFinish", {
-                laps: this.player.laps,
-                timestamp: this.debugState.finishHandledAt,
-            });
-            
-            let rank = 1;
-            for (let npc of this.npcs)
-            if (npc.laps > 2)
-            rank++;
-            
-            this.ui.dashboard.style.display = "none";
-            this.ui.joystick.style.display = "none";
-            this.ui.finishScreen.style.display = "flex";
-            this.ui.finishScreen.style.opacity = "1";
-            this.debugState.finishPanelVisibleAt = performance.now();
-            document.body.dataset.finishPanelVisible = "true";
-            console.info("[finish] finishScreenVisible", {
-                rank,
-                timestamp: this.debugState.finishPanelVisibleAt,
-                time: this.track.getTimeString(),
-            });
+        if (this.finished)
+            return;
 
-            let suffixes = ["st", "nd", "rd"]
-            this.ui.finishRank.innerHTML = rank.toString();
-            this.ui.finishRankSuffix.innerHTML = suffixes[rank - 1];
-            this.ui.finishTime.innerHTML =
-                `Time: ${this.track.getTimeString()}`;
+        this.captureNpcFinishers();
+        this.playerFinishTimeMs = this.track.elapsedTime;
+        this.finishTimes.set("player", this.playerFinishTimeMs);
+        this.playerFinishRank = undefined;
+        this.debugState.finishHandledAt = performance.now();
+        this.debugState.finishPanelVisibleAt = performance.now();
+        this.debugState.laps = this.player.laps;
+        this.finished = true;
+        this.hudState.showResults = true;
+        this.hudState.showSettings = false;
+        document.body.dataset.raceFinished = "true";
+        document.body.dataset.finishPanelVisible = "true";
+        document.body.dataset.playerLaps = this.player.laps.toString();
+        this.updateJoystickVisibility();
 
-            this.player.sounds["complete-race"]?.play();
-            try {
-                this.player.engineSound.stop();
-            } catch (_error) {
-                // Avoid blocking the finish overlay if engine audio was already stopped.
-            }
-
-            this.finished = true;
+        this.player.sounds["complete-race"]?.play();
+        try {
+            this.player.engineSound.stop();
+        } catch (_error) {
+            // Avoid blocking the results panel if engine audio was already stopped.
         }
     }
 
@@ -1673,30 +1952,27 @@ export default class GameScene extends THREE.Scene {
         // wait 3 seconds for fade in
         // wait 3 seconds for countdown
         this.countdown += dt;
-        this.handleCountdown();
+        this.syncCountdownState();
         if (this.countdown < 6000) {
             this.updateRaceVehicleStates();
+            this.updateHudState();
+            this.renderHud();
             return;
         }
 
         if (this.finishPreview) {
             this.player.laps = 3;
+            this.capturePlayerLapProgress();
             this.handleRaceFinish();
-            return;
+            this.finishPreview = false;
         }
 
-        // race ends after 2 laps
-        this.debugState.laps = this.player.laps;
-        document.body.dataset.playerLaps = this.player.laps.toString();
-        if (this.player.laps > 2)
-            this.handleRaceFinish();
-        else
-            this.track.update(dt);
-        
-        // update vehicles
-        this.player.update(this.track, dt, this.keysPressed);
+        this.track.update(dt);
 
         let raceRunningMs = Math.max(0, this.countdown - 6000);
+        if (!this.finished)
+            this.player.update(this.track, dt, this.keysPressed);
+
         for (let i = 0; i < this.npcs.length; i++) {
             let npc = this.npcs[i];
             let npcState = this.raceVehicleStates[i + 1];
@@ -1708,9 +1984,19 @@ export default class GameScene extends THREE.Scene {
             });
         }
 
+        this.recordPlayerTelemetry(dt);
+        this.captureNpcFinishers();
+        this.capturePlayerLapProgress();
+        this.debugState.laps = this.player.laps;
+        document.body.dataset.playerLaps = this.player.laps.toString();
+        if (!this.finished && this.player.laps > this.hudState.totalLaps)
+            this.handleRaceFinish();
+
         this.updateRaceVehicleStates();
         this.updateDraftBoosts(dt);
         this.handleVehicleCollisions();
+        this.updateHudState();
+        this.renderHud();
     }
 
     activate() {
@@ -1725,12 +2011,12 @@ export default class GameScene extends THREE.Scene {
             this.ui.curtain.classList.remove("fade-in");
             this.ui.curtain.style.opacity = "0";
         }, 650);
-        let isTouchDevice = "ontouchstart" in window || navigator.maxTouchPoints > 0;
-        this.ui.dashboard.style.display = "block";
-        this.ui.joystick.style.display = isTouchDevice ? "block" : "none";
+        this.updateJoystickVisibility();
         window.addEventListener("resize", this.handleResizeBound, false);
         window.addEventListener("keydown", this.handleKeyDownBound);
         window.addEventListener("keyup", this.handleKeyUpBound);
+        window.addEventListener("pointerdown", this.handlePointerDownBound, false);
+        this.renderHud();
     }
 
     deactivate() {
@@ -1739,11 +2025,11 @@ export default class GameScene extends THREE.Scene {
 
         this.active = false;
         this.keysPressed = {};
-        this.ui.dashboard.style.display = "none";
         this.ui.joystick.style.display = "none";
         window.removeEventListener("resize", this.handleResizeBound, false);
         window.removeEventListener("keydown", this.handleKeyDownBound);
         window.removeEventListener("keyup", this.handleKeyUpBound);
+        window.removeEventListener("pointerdown", this.handlePointerDownBound, false);
     }
 
     dispose() {
@@ -1752,19 +2038,16 @@ export default class GameScene extends THREE.Scene {
 
         if (this.fadeInTimeout)
             window.clearTimeout(this.fadeInTimeout);
-        if (this.finishScreenTimeout)
-            window.clearTimeout(this.finishScreenTimeout);
         if (this.handleKnobTouchMoveBound)
             this.ui.knob.removeEventListener("touchmove", this.handleKnobTouchMoveBound, false);
         if (this.handleKnobTouchEndBound)
             this.ui.knob.removeEventListener("touchend", this.handleKnobTouchEndBound, false);
 
-        this.ui.finishScreen.style.display = "none";
-        this.ui.finishScreen.style.opacity = "0";
-        this.ui.countdown.innerHTML = "";
         this.ui.curtain.classList.remove("fade-in", "fade-to-black", "long-fade-to-black", "scroll-up");
         this.ui.curtain.style.opacity = "0";
         this.ui.curtain.style.height = "100vh";
+        this.hudState = this.hud.createDefaultState();
+        this.renderHud();
 
         this.player?.clearPendingTimeouts();
         this.player?.disposeAudio?.();

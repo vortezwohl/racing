@@ -109,24 +109,19 @@ interface MenuSceneOptions {
 
 interface RaceUi {
     backgroundHost: HTMLElement;
-    counter: HTMLElement;
-    countdown: HTMLElement;
     curtain: HTMLElement;
-    dashboard: HTMLElement;
-    finishRank: HTMLElement;
-    finishRankSuffix: HTMLElement;
-    finishScreen: HTMLElement;
-    finishTime: HTMLElement;
+    hudCanvas: HTMLCanvasElement;
     joystick: HTMLElement;
     knob: HTMLElement;
     markerHost: HTMLElement;
-    timer: HTMLElement;
 }
 
 interface GameSceneOptions {
     canvas: HTMLCanvasElement;
     debug?: boolean;
     finishPreview?: boolean;
+    onExitToMenu?: () => void;
+    onRestartRace?: () => void;
     speederIndex: number;
     ui: RaceUi;
 }

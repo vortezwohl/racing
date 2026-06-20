@@ -10,7 +10,7 @@
                 src: local("Trebuchet MS");
             }
         </style>
-        <link rel="stylesheet" type="text/css" href="./css/styles.css">
+        <link rel="stylesheet" type="text/css" href="./css/styles.css?v=20260621-hud">
         <link rel="icon" type="image/svg+xml" href="./assets/favicon.ico" />
     </head>
     
@@ -23,34 +23,17 @@
             </section>
 
             <section id="race-view" class="app-view" aria-hidden="true">
-                <div id="dashboard">
-                    <div id="counter">Lap 1/2</div>
-                    <div id="countdown"></div>
-                    <div id="timer">00:00:00</div>
-                </div>
+                <canvas id="game"></canvas>
+                <canvas id="race-hud"></canvas>
 
                 <div id="marker-layer"></div>
 
                 <div id="joystick">
                     <div id="knob"></div>
                 </div>
-
-                <div id="finish-screen">
-                    <div id="finish-text">You finished</div>
-
-                    <div id="finish-stats">
-                        <div id="finish-rank"></div>
-                        <div id="finish-stats-right">
-                            <div id="finish-rank-suffix"></div>
-                            <div id="finish-time"></div>
-                        </div>
-                    </div>
-                </div>
-
-                <canvas id="game"></canvas>
             </section>
         </div>
 
-        <script type="application/javascript" src="./dist/app.bundle.js" ></script>
+        <script type="application/javascript" src="./dist/app.bundle.js?v=20260621-hud" ></script>
     </body>
 </html>

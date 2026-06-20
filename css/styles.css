@@ -16,7 +16,40 @@ body {
     height: 100vh;
 }
 
+#app-shell,
+.app-view,
+#race-view {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+}
+
 canvas {
     display: block;
     background-color: transparent;
+}
+
+#race-view canvas,
+#marker-layer,
+#joystick {
+    position: absolute;
+    inset: 0;
+}
+
+#game {
+    z-index: 1;
+}
+
+#race-hud {
+    z-index: 11;
+    pointer-events: none;
+}
+
+#marker-layer {
+    z-index: 12;
+    pointer-events: none;
+}
+
+#joystick {
+    z-index: 13;
 }

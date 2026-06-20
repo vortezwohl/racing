@@ -8,7 +8,9 @@ import { racePerformance } from "../utils/raceConfig";
 type VehicleControlInput = {
     accelerationScale?: number;
     brake?: number;
+    brakeScale?: number;
     steer?: number;
+    steerScale?: number;
     throttle?: number;
 };
 
@@ -265,12 +267,12 @@ export default class Vehicle {
                                 this.laps++;
                                 document.body.dataset.playerLaps = this.laps.toString();
 
-                                if (player) {
+                                if (player)
                                     this.sounds["complete-lap"]?.play();
-                                    let raceUi = track.body.parent?.userData.raceUi;
-                                    if (raceUi?.counter)
-                                        raceUi.counter.innerHTML = `Lap ${this.laps.toString()}/2`;
-                                }
+
+                                let onVehicleLapAdvance = track.body.parent?.userData.onVehicleLapAdvance;
+                                if (typeof onVehicleLapAdvance === "function")
+                                    onVehicleLapAdvance(this, this.laps);
                             }
                             
                             this.lastCheckpointIndex = checkpoint.index;
@@ -396,7 +398,9 @@ export default class Vehicle {
     applyControlInput(input: VehicleControlInput, dt: number) {
         let throttle = THREE.MathUtils.clamp(input.throttle || 0, 0, 1);
         let brake = THREE.MathUtils.clamp(input.brake || 0, 0, 1);
+        let brakeScale = input.brakeScale || 1;
         let steer = THREE.MathUtils.clamp(input.steer || 0, -1, 1);
+        let steerScale = input.steerScale || 1;
         let accelerationScale = input.accelerationScale || 1;
 
         if (throttle > 0) {
@@ -407,13 +411,13 @@ export default class Vehicle {
 
         if (brake > 0) {
             this.velocity.sub(this.direction.clone().multiplyScalar(
-                this.deceleration * this.thrust * brake * dt,
+                this.deceleration * this.thrust * brake * brakeScale * dt,
             ));
         }
 
         if (steer != 0) {
             let steeringScale = this.getSteeringScale(steer, dt);
-            this.turn(-steer * this.turnRate * steeringScale * dt);
+            this.turn(-steer * this.turnRate * steeringScale * steerScale * dt);
         } else {
             this.updateSteeringHold(0, dt);
         }

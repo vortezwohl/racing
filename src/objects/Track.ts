@@ -262,9 +262,6 @@ export default class Track {
             return;
 
         this.elapsedTime += dt;
-        let raceUi = this.body.parent?.userData.raceUi;
-        if (raceUi?.timer)
-            raceUi.timer.innerHTML = this.getTimeString();
         
         for (let platform of this.movingPlatforms) {
             let time = (this.elapsedTime + platform.phase) % platform.period;

@@ -17,34 +17,31 @@ class AppShell {
     currentTime: number;
     gameCanvas: HTMLCanvasElement;
     gameScene: GameScene | null;
+    isReturningToMenuThroughCurtain: boolean;
     menuCanvas: HTMLCanvasElement;
     menuScene: MenuScene;
     menuView: HTMLElement;
     raceUi: RaceUi;
     raceView: HTMLElement;
+    returnToMenuFadeTimeout?: number;
+    returnToMenuSwitchTimeout?: number;
 
     constructor() {
         this.currentScene = null;
         this.currentTime = 0;
         this.gameCanvas = this.requireElement<HTMLCanvasElement>("game");
         this.gameScene = null;
+        this.isReturningToMenuThroughCurtain = false;
         this.menuCanvas = this.requireElement<HTMLCanvasElement>("menu");
         this.menuView = this.requireElement<HTMLElement>("menu-view");
         this.raceView = this.requireElement<HTMLElement>("race-view");
         this.raceUi = {
             backgroundHost: document.body,
-            counter: this.requireElement<HTMLElement>("counter"),
-            countdown: this.requireElement<HTMLElement>("countdown"),
             curtain: this.requireElement<HTMLElement>("curtain"),
-            dashboard: this.requireElement<HTMLElement>("dashboard"),
-            finishRank: this.requireElement<HTMLElement>("finish-rank"),
-            finishRankSuffix: this.requireElement<HTMLElement>("finish-rank-suffix"),
-            finishScreen: this.requireElement<HTMLElement>("finish-screen"),
-            finishTime: this.requireElement<HTMLElement>("finish-time"),
+            hudCanvas: this.requireElement<HTMLCanvasElement>("race-hud"),
             joystick: this.requireElement<HTMLElement>("joystick"),
             knob: this.requireElement<HTMLElement>("knob"),
             markerHost: this.requireElement<HTMLElement>("marker-layer"),
-            timer: this.requireElement<HTMLElement>("timer"),
         };
         this.raceUi.curtain.style.position = "fixed";
         this.raceUi.curtain.style.inset = "0";
@@ -53,9 +50,6 @@ class AppShell {
         this.raceUi.markerHost.style.inset = "0";
         this.raceUi.markerHost.style.zIndex = "12";
         this.raceUi.markerHost.style.pointerEvents = "none";
-        this.raceUi.finishScreen.style.position = "absolute";
-        this.raceUi.finishScreen.style.inset = "0";
-        this.raceUi.finishScreen.style.zIndex = "30";
 
         this.menuScene = new MenuScene({
             canvas: this.menuCanvas,
@@ -98,6 +92,8 @@ class AppShell {
         this.gameScene = new GameScene({
             canvas: this.gameCanvas,
             finishPreview: false,
+            onExitToMenu: () => this.navigateToMenu(),
+            onRestartRace: () => this.navigateToRace(speederIndex),
             speederIndex,
             ui: this.raceUi,
         });
@@ -122,6 +118,11 @@ class AppShell {
     }
 
     navigateToMenu() {
+        if (this.currentScene instanceof GameScene) {
+            this.beginReturnToMenuTransition();
+            return;
+        }
+
         if (window.location.hash === "#/menu") {
             this.syncRoute();
             return;
@@ -131,7 +132,13 @@ class AppShell {
     }
 
     navigateToRace(speederIndex: number) {
-        window.location.hash = `#/race?speeder=${speederIndex}`;
+        let nextHash = `#/race?speeder=${speederIndex}`;
+        if (window.location.hash === nextHash) {
+            this.syncRoute();
+            return;
+        }
+
+        window.location.hash = nextHash;
     }
 
     attachDebugRefs() {
@@ -149,6 +156,60 @@ class AppShell {
         return element as T;
     }
 
+    clearCurtainAnimations() {
+        this.raceUi.curtain.classList.remove("fade-in", "fade-to-black", "long-fade-to-black", "scroll-up");
+    }
+
+    clearReturnToMenuTimeouts() {
+        if (this.returnToMenuFadeTimeout) {
+            window.clearTimeout(this.returnToMenuFadeTimeout);
+            this.returnToMenuFadeTimeout = undefined;
+        }
+
+        if (this.returnToMenuSwitchTimeout) {
+            window.clearTimeout(this.returnToMenuSwitchTimeout);
+            this.returnToMenuSwitchTimeout = undefined;
+        }
+    }
+
+    resetCurtain() {
+        this.clearCurtainAnimations();
+        this.raceUi.curtain.style.opacity = "0";
+        this.raceUi.curtain.style.height = "100vh";
+    }
+
+    beginReturnToMenuTransition() {
+        if (this.isReturningToMenuThroughCurtain)
+            return;
+
+        this.isReturningToMenuThroughCurtain = true;
+        this.clearReturnToMenuTimeouts();
+        this.resetCurtain();
+        void this.raceUi.curtain.offsetWidth;
+        this.raceUi.curtain.classList.add("long-fade-to-black");
+        this.returnToMenuSwitchTimeout = window.setTimeout(() => {
+            this.returnToMenuSwitchTimeout = undefined;
+            if (window.location.hash === "#/menu")
+                this.syncRoute();
+            else
+                window.location.hash = "#/menu";
+        }, 580);
+    }
+
+    revealMenuFromCurtain() {
+        this.clearReturnToMenuTimeouts();
+        this.clearCurtainAnimations();
+        this.raceUi.curtain.style.opacity = "1";
+        this.raceUi.curtain.style.height = "100vh";
+        void this.raceUi.curtain.offsetWidth;
+        this.raceUi.curtain.classList.add("fade-in");
+        this.returnToMenuFadeTimeout = window.setTimeout(() => {
+            this.returnToMenuFadeTimeout = undefined;
+            this.isReturningToMenuThroughCurtain = false;
+            this.resetCurtain();
+        }, 620);
+    }
+
     setActiveView(view: "menu" | "race") {
         let showMenu = view === "menu";
         this.menuView.classList.toggle("is-active", showMenu);
@@ -157,13 +218,10 @@ class AppShell {
         this.raceView.classList.toggle("is-active", !showMenu);
         this.raceView.setAttribute("aria-hidden", showMenu ? "true" : "false");
         this.raceView.style.display = showMenu ? "none" : "block";
-        this.raceUi.dashboard.style.display = showMenu ? "none" : this.raceUi.dashboard.style.display;
         this.raceUi.joystick.style.display = showMenu ? "none" : this.raceUi.joystick.style.display;
         if (showMenu) {
-            this.raceUi.finishScreen.style.display = "none";
-            this.raceUi.curtain.classList.remove("fade-in", "fade-to-black", "long-fade-to-black", "scroll-up");
-            this.raceUi.curtain.style.opacity = "0";
-            this.raceUi.curtain.style.height = "100vh";
+            if (!this.isReturningToMenuThroughCurtain)
+                this.resetCurtain();
             this.raceUi.backgroundHost.style.background = "";
         }
     }
@@ -186,9 +244,11 @@ class AppShell {
             }
             this.attachDebugRefs();
             this.menuScene.activate();
-            this.menuScene.reset();
+            this.menuScene.reset(this.isReturningToMenuThroughCurtain);
             this.currentScene = this.menuScene;
             this.setActiveView("menu");
+            if (this.isReturningToMenuThroughCurtain)
+                this.revealMenuFromCurtain();
             return;
         }
 

@@ -1120,12 +1120,13 @@ export default class MenuScene extends THREE.Scene {
         window.removeEventListener("keydown", this.handleKeydownBound);
     }
 
-    reset() {
+    reset(preserveCurtain: boolean = false) {
         this.transitionStart = 0;
         this.confirmPressedUntil = 0;
         this.leftArrowPressedUntil = 0;
         this.rightArrowPressedUntil = 0;
-        this.setCurtainOpacity(0);
+        if (!preserveCurtain)
+            this.setCurtainOpacity(0);
         this.selectVehicle(this.selectedIndex, false);
         this.applyMenuOverlayOpacity(1);
         this.updateLayout();
