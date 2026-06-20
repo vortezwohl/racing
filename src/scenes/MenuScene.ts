@@ -167,9 +167,13 @@ export default class MenuScene extends THREE.Scene {
         canvas.width = 900;
         canvas.height = 260;
         context.clearRect(0, 0, canvas.width, canvas.height);
+        context.textAlign = "center";
+        context.textBaseline = "middle";
+        context.lineJoin = "round";
+        context.lineCap = "round";
 
         let radius = 54;
-        context.fillStyle = shadowStyle;
+        context.fillStyle = "#07142c";
         context.beginPath();
         context.moveTo(120 + radius, 56);
         context.lineTo(780 - radius, 56);
@@ -183,7 +187,11 @@ export default class MenuScene extends THREE.Scene {
         context.closePath();
         context.fill();
 
-        context.fillStyle = fillStyle;
+        context.strokeStyle = "rgba(96, 235, 255, 0.42)";
+        context.lineWidth = 6;
+        context.stroke();
+
+        context.fillStyle = "#0a2455";
         context.beginPath();
         context.moveTo(120 + radius, 38);
         context.lineTo(780 - radius, 38);
@@ -197,14 +205,25 @@ export default class MenuScene extends THREE.Scene {
         context.closePath();
         context.fill();
 
-        context.textAlign = "center";
-        context.textBaseline = "middle";
-        context.font = '900 88px "Trebuchet MS", "Verdana", sans-serif';
-        context.lineWidth = 4;
-        context.strokeStyle = shadowStyle;
-        context.strokeText(text, canvas.width / 2, canvas.height / 2 + 4);
-        context.fillStyle = "#efc57e";
-        context.fillText(text, canvas.width / 2, canvas.height / 2 + 4);
+        context.fillStyle = "#081a38";
+        context.fillRect(152, 58, 596, 144);
+
+        context.strokeStyle = "rgba(48, 167, 255, 0.34)";
+        context.lineWidth = 2;
+        context.strokeRect(160, 66, 580, 128);
+
+        this.drawNeonText(
+            context,
+            text,
+            canvas.width / 2,
+            canvas.height / 2 + 4,
+            88,
+            "900",
+            shadowStyle,
+            fillStyle,
+            glowStyle,
+            "#d5fbff",
+        );
 
         let texture = new THREE.CanvasTexture(canvas);
         let material = new THREE.SpriteMaterial({
@@ -233,18 +252,18 @@ export default class MenuScene extends THREE.Scene {
         canvas.width = 1400;
         canvas.height = 320;
         context.clearRect(0, 0, canvas.width, canvas.height);
-        context.textAlign = "center";
-        context.textBaseline = "middle";
-        context.font = `${fontWeight} ${fontSize}px "Trebuchet MS", "Verdana", sans-serif`;
-
-        if (shadowStyle) {
-            context.lineWidth = Math.max(6, Math.floor(fontSize * 0.08));
-            context.strokeStyle = shadowStyle;
-            context.strokeText(text, canvas.width / 2, canvas.height / 2);
-        }
-
-        context.fillStyle = fillStyle;
-        context.fillText(text, canvas.width / 2, canvas.height / 2);
+        this.drawNeonText(
+            context,
+            text,
+            canvas.width / 2,
+            canvas.height / 2,
+            fontSize,
+            fontWeight,
+            shadowStyle || "#0f2d5e",
+            fillStyle,
+            "#46d8ff",
+            "#efffff",
+        );
 
         let texture = new THREE.CanvasTexture(canvas);
         texture.needsUpdate = true;
@@ -261,12 +280,70 @@ export default class MenuScene extends THREE.Scene {
     createVehicleLabel(vehicle: MenuVehicle): THREE.Sprite {
         return this.createTextSprite(
             vehicle.label,
-            vehicle.titleColor,
-            undefined,
+            "#4de8ff",
+            "#0f2d5e",
             64,
             2.15,
             "800",
         );
+    }
+
+    drawNeonText(
+        context: CanvasRenderingContext2D,
+        text: string,
+        x: number,
+        y: number,
+        fontSize: number,
+        fontWeight: string,
+        depthColor: string,
+        fillColor: string,
+        glowColor: string,
+        highlightColor: string,
+    ) {
+        let fontFamily = '"Orbitron", "Rajdhani", "Trebuchet MS", "Verdana", sans-serif';
+        context.save();
+        context.textAlign = "center";
+        context.textBaseline = "middle";
+        context.lineJoin = "round";
+        context.lineCap = "round";
+        context.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+
+        let depthSteps = 7;
+        for (let i = depthSteps; i > 0; i--) {
+            let offset = i * 1.5;
+            context.save();
+            context.translate(offset, offset * 0.82);
+            context.fillStyle = i > 3 ? "#061327" : depthColor;
+            context.strokeStyle = "rgba(8, 24, 54, 0.72)";
+            context.lineWidth = Math.max(3, Math.floor(fontSize * 0.06));
+            context.fillText(text, x, y);
+            context.strokeText(text, x, y);
+            context.restore();
+        }
+
+        let gradient = context.createLinearGradient(
+            x,
+            y - fontSize * 0.72,
+            x,
+            y + fontSize * 0.72,
+        );
+        gradient.addColorStop(0, highlightColor);
+        gradient.addColorStop(0.38, fillColor);
+        gradient.addColorStop(1, "#1068ff");
+
+        context.shadowBlur = fontSize * 0.18;
+        context.shadowColor = glowColor;
+        context.lineWidth = Math.max(3, Math.floor(fontSize * 0.07));
+        context.strokeStyle = depthColor;
+        context.fillStyle = gradient;
+        context.strokeText(text, x, y);
+        context.fillText(text, x, y);
+
+        context.shadowBlur = 0;
+        context.lineWidth = Math.max(2, Math.floor(fontSize * 0.03));
+        context.strokeStyle = "rgba(223, 252, 255, 0.78)";
+        context.strokeText(text, x, y);
+        context.restore();
     }
 
     createArrowSprite(
@@ -319,9 +396,9 @@ export default class MenuScene extends THREE.Scene {
         this.titleGroup = new THREE.Group();
 
         this.titleShadowSprite = this.createTextSprite(
-            "Pick Your Racer!",
-            "#2a1808",
-            undefined,
+            "SPACE RACER",
+            "#0a2b62",
+            "#07142c",
             120,
             6.5,
             "900",
@@ -330,9 +407,9 @@ export default class MenuScene extends THREE.Scene {
         this.titleGroup.add(this.titleShadowSprite);
 
         this.titleSprite = this.createTextSprite(
-            "Pick Your Racer!",
-            "#efc883",
-            "#8f6132",
+            "SPACE RACER",
+            "#62ecff",
+            "#0f4ca3",
             120,
             6.5,
             "900",
@@ -342,8 +419,8 @@ export default class MenuScene extends THREE.Scene {
 
         this.subtitleSprite = this.createTextSprite(
             "Use the arrows to browse ships.",
-            "#96a9c4",
-            undefined,
+            "#4fd6ff",
+            "#10336f",
             56,
             2.7,
             "700",
@@ -405,19 +482,19 @@ export default class MenuScene extends THREE.Scene {
         this.confirmButtonGroup = new THREE.Group();
 
         this.confirmButtonShadowSprite = this.createButtonSprite(
-            "Confirm",
-            "#6f3f0c",
-            "#2e1706",
-            "#2e1706",
+            "Play",
+            "#0a2f5f",
+            "#061327",
+            "#143b8a",
         );
         this.confirmButtonShadowSprite.position.set(0.12, -0.12, -0.1);
         this.confirmButtonGroup.add(this.confirmButtonShadowSprite);
 
         this.confirmButtonSprite = this.createButtonSprite(
-            "Confirm",
-            "#f7a840",
-            "#9c5b12",
-            "#ffd37a",
+            "Play",
+            "#4de8ff",
+            "#0f4ca3",
+            "#c8feff",
         );
         this.confirmButtonGroup.add(this.confirmButtonSprite);
         this.confirmButtonBaseScale = this.confirmButtonSprite.scale.clone();
