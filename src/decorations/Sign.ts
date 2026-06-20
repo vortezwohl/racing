@@ -58,7 +58,11 @@ export default class Sign extends THREE.Mesh {
                 if (data.textureRotation)
                     texture.rotation = data.textureRotation;
                 
-                this.material = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
+                this.material = new THREE.MeshBasicMaterial({
+                    map: texture,
+                    color: 0x86c6ff,
+                    side: THREE.DoubleSide
+                });
             });
 
         this.scale.set(1, 2, 1);

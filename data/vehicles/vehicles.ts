@@ -10,6 +10,7 @@ interface MenuVehicle {
     label: string;
     playableIndex: number;
     accentColor: number;
+    menuScaleMultiplier: number;
     titleColor: string;
     titleShadowColor: string;
     data: VehicleData;
@@ -23,6 +24,7 @@ let menuVehicles: Array<MenuVehicle> = [
         label: "Sunbeam",
         playableIndex: 0,
         accentColor: 0xffb347,
+        menuScaleMultiplier: 1.04,
         titleColor: "#ffd27a",
         titleShadowColor: "#9f5f16",
         data: speeder_1
@@ -32,6 +34,7 @@ let menuVehicles: Array<MenuVehicle> = [
         label: "Lime Glide",
         playableIndex: 1,
         accentColor: 0xd3f36b,
+        menuScaleMultiplier: 1.08,
         titleColor: "#dcff86",
         titleShadowColor: "#4e7320",
         data: speeder_2
@@ -41,6 +44,7 @@ let menuVehicles: Array<MenuVehicle> = [
         label: "Cherry Flash",
         playableIndex: 2,
         accentColor: 0xff7a90,
+        menuScaleMultiplier: 1.11,
         titleColor: "#ffb2c0",
         titleShadowColor: "#8a2d47",
         data: speeder_3
@@ -50,6 +54,7 @@ let menuVehicles: Array<MenuVehicle> = [
         label: "Bunny Bike",
         playableIndex: 3,
         accentColor: 0x82d7ff,
+        menuScaleMultiplier: 1.28,
         titleColor: "#bde8ff",
         titleShadowColor: "#2a5f86",
         data: bike
@@ -59,6 +64,7 @@ let menuVehicles: Array<MenuVehicle> = [
         label: "Sunny Mustang",
         playableIndex: 4,
         accentColor: 0xffd86b,
+        menuScaleMultiplier: 1.18,
         titleColor: "#ffe6a4",
         titleShadowColor: "#8d6722",
         data: mustang

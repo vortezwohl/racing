@@ -73,17 +73,23 @@ let track_1: TrackData = {
         {
             shapes: [[[15, -0.4], [16, -0.4]], [[7, -0.4], [8, -0.4]],
                 [[0.4, 15], [0.4, 16]], [[0.4, 7], [0.4, 8]], [[15, 0.4], [16, 0.4]]],
-            material: new THREE.MeshLambertMaterial({ color: 0xcccccc })
+            material: new THREE.MeshLambertMaterial({ color: 0xd2f2ff })
         },
         {
             shapes: [[[-15, -0.4], [-16, -0.4]], [[-7, -0.4], [-8, -0.4]],
                 [[0.4, -15], [0.4, -16]], [[0.4, -7], [0.4, -8]], [[-15, 0.4], [-16, 0.4]]],
-            material: new THREE.MeshStandardMaterial({ color: 0xcccccc })
+            material: new THREE.MeshStandardMaterial({
+                color: 0xb8e6ff,
+                emissive: 0x1e4d78,
+                emissiveIntensity: 0.18,
+                roughness: 0.52,
+                metalness: 0.08
+            })
         },
         {
             shapes: [[[15, -0.4], [-15, -0.4]], [[7, -0.4], [-7, -0.4]],
                 [[0.4, 15], [0.4, -15]], [[0.4, 7], [0.4, -7]], [[15, 0.4], [-15, 0.4]]],
-            material: new THREE.MeshLambertMaterial({ color: 0xaaaaaa, transparent: true, opacity: 0.3 })
+            material: new THREE.MeshLambertMaterial({ color: 0x77ace0, transparent: true, opacity: 0.32 })
         }
     ],
     checkpoints: [
@@ -115,7 +121,8 @@ let track_1: TrackData = {
             resetRotation: new THREE.Euler(0, Math.PI / 2, 0, "YZX"),
         }
     ],
-    backgroundColors: ["#000226"],
+    backgroundColors: ["#03040c", "#05081a", "#020208"],
+    backgroundStyle: "radial-gradient(circle at 18% 18%, rgba(72, 112, 196, 0.56), transparent 31%), radial-gradient(circle at 82% 12%, rgba(168, 96, 214, 0.72), transparent 40%), linear-gradient(180deg, #03040c 0%, #091226 52%, #020208 100%)",
     signsPoints: [
         {
             points: [[550, 1, 50]],

@@ -14,7 +14,11 @@ export default class StartLine extends THREE.Group {
         let loader = new THREE.TextureLoader();
         await loader.loadAsync("./assets/textures/checkerboard.jpg")
             .then(texture => {
-                let bannerMaterial = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
+                let bannerMaterial = new THREE.MeshBasicMaterial({
+                    map: texture,
+                    color: 0x8cc8ff,
+                    side: THREE.DoubleSide
+                });
                 let bannerGeometry = new THREE.PlaneGeometry(36, 5);
                 let bannerMesh = new THREE.Mesh(bannerGeometry, bannerMaterial);
                 bannerMesh.position.set(position.x, position.y + 8, position.z);
@@ -30,7 +34,7 @@ export default class StartLine extends THREE.Group {
         ];
         let polePath = new THREE.CatmullRomCurve3(polePoints);
         let poleGeometry = new THREE.TubeGeometry(polePath, 8, 1, 6, true);
-        let poleMaterial = new THREE.MeshBasicMaterial({ color: 0xcccccc, 
+        let poleMaterial = new THREE.MeshBasicMaterial({ color: 0x7ec0ff, 
             wireframe: true, side: THREE.DoubleSide });
         let poleMesh = new THREE.Mesh(poleGeometry, poleMaterial);
         this.add(poleMesh);

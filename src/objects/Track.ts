@@ -204,7 +204,8 @@ export default class Track {
             debugAxes(scene);
         
         // set up background gradient
-        let background = `linear-gradient(${trackData.backgroundColors.join(", ")})`;
+        let background = trackData.backgroundStyle ||
+            `linear-gradient(${trackData.backgroundColors.join(", ")})`;
         document.getElementsByTagName("body")[0].style
             .background = background;
         

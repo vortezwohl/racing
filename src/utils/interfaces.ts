@@ -66,6 +66,7 @@ interface TrackData {
     layerData: Array<LayerData>;
     checkpoints: Array<CheckpointData>;
     backgroundColors: Array<string>;
+    backgroundStyle?: string;
     signsPoints?: Array<CurveData>
     gridColor?: number | THREE.Color;
 }
@@ -86,13 +87,18 @@ interface VehicleData {
 }
 
 interface MenuLayout {
-    vehicleSpacing: number;
     cameraZoom: number;
+    confirmButtonScale: number;
+    confirmY: number;
+    labelY: number;
+    arrowOffsetX: number;
+    arrowScale: number;
+    subtitleY: number;
     titleScale: number;
     titleY: number;
-    titleX: number;
-    titleLetterSpacing: number;
     titlePulseAmplitude: number;
+    vehicleBaseScale: number;
+    vehicleY: number;
 }
 
 export {
