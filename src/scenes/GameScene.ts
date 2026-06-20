@@ -910,6 +910,9 @@ export default class GameScene extends THREE.Scene {
     }
 
     getMarkerOpacity(position: THREE.Vector3): number {
+        if (this.countdown < 6000)
+            return raceTrail.maxMarkerOpacity;
+
         let distance = this.camera.position.distanceTo(position);
         let distanceOpacity = distance >= raceTrail.fadeStartDistance ?
             raceTrail.maxMarkerOpacity :
@@ -1026,6 +1029,7 @@ export default class GameScene extends THREE.Scene {
         if (!state.markerElements)
             return;
 
+        this.camera.updateMatrixWorld();
         let markerBounds = this.ui.markerHost.getBoundingClientRect();
         let projected = markerPosition.clone().project(this.camera);
         let isInFrontOfCamera = projected.z <= 1;
@@ -1069,8 +1073,10 @@ export default class GameScene extends THREE.Scene {
                 state.markerElements.root.style.display = "none";
                 return;
             }
-            let markerPosition = vehicle.position.clone();
-            markerPosition.y += vehicle.height * 0.5 + raceTrail.markerWorldOffset;
+            let markerPosition = vehicle.model?.position.clone() || vehicle.position.clone();
+            let anchorLift = vehicle.hitbox.up.clone().normalize()
+                .multiplyScalar(vehicle.height * 0.5 + raceTrail.markerWorldOffset);
+            markerPosition.add(anchorLift);
             this.updateMarkerPlacement(state, markerPosition);
             this.setMarkerOpacity(
                 state.markerElements,

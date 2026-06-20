@@ -25,6 +25,7 @@ export default class Vehicle {
 
     width: number;
     height: number;
+    hitboxScale: number;
     length: number;
 
     model: THREE.Group;
@@ -67,6 +68,7 @@ export default class Vehicle {
 
         this.width = vehicleData.width;
         this.height = vehicleData.height;
+        this.hitboxScale = 0.85;
         this.length = vehicleData.length;
 
         this.render(scene, vehicleData.modelPath, debug);
@@ -128,7 +130,11 @@ export default class Vehicle {
         this.model.setRotationFromEuler(this.rotation.clone());
 
         // vehicle hitbox
-        let geometry = new THREE.BoxGeometry(this.width, this.height, this.length);
+        let geometry = new THREE.BoxGeometry(
+            this.width * this.hitboxScale,
+            this.height * this.hitboxScale,
+            this.length * this.hitboxScale,
+        );
         let material = new THREE.MeshBasicMaterial({
             color: 0x00ff00,
             depthWrite: false,

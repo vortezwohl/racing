@@ -48,12 +48,12 @@ const raceTrail = {
     minLength: 12,
     minMarkerOpacity: 0,
     opacity: 0.42,
-    particleOpacity: 0.18,
+    particleOpacity: 0,
     particleScale: 0.48,
     particleSpread: 0.52,
     sampleCount: 72,
     lengthExponent: 1.9,
-    wobbleStrength: 0.09,
+    wobbleStrength: 0,
 };
 
 const raceCollision = {
