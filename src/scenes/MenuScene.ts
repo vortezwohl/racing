@@ -5,7 +5,7 @@ import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass";
 import { randomVector } from "../utils/geometry";
-import { MenuLayout } from "../utils/interfaces";
+import { MenuLayout, MenuSceneOptions } from "../utils/interfaces";
 import { menuVehicles, MenuVehicle } from "../../data/vehicles/vehicles";
 
 type SelectableVehicle = {
@@ -30,6 +30,13 @@ type MenuStar = {
 
 export default class MenuScene extends THREE.Scene {
     camera: THREE.OrthographicCamera;
+    canvas: HTMLCanvasElement;
+    active: boolean;
+    handleKeydownBound: (event: KeyboardEvent) => void;
+    handlePointerDownBound: (event: PointerEvent) => void;
+    handleResizeBound: () => void;
+    handleTouchStartBound: (event: TouchEvent) => void;
+    onPlay?: (speederIndex: number) => void;
     renderer: THREE.WebGLRenderer;
     composer: EffectComposer;
     filter: UnrealBloomPass;
@@ -70,16 +77,31 @@ export default class MenuScene extends THREE.Scene {
 
     sounds: { [key: string]: HTMLAudioElement };
 
-    constructor() {
+    constructor(options: MenuSceneOptions) {
         super();
 
+        this.canvas = options.canvas;
         this.width = window.innerWidth;
         this.height = window.innerHeight;
-        this.curtain = document.getElementById("curtain");
+        this.curtain = options.curtain;
         this.selectedIndex = 0;
         this.pointer = new THREE.Vector2();
         this.raycaster = new THREE.Raycaster();
+        this.active = false;
         this.backgroundRoot = new THREE.Group();
+        this.handleKeydownBound = (event: KeyboardEvent) => {
+            this.handleKeydown(event);
+        };
+        this.handlePointerDownBound = (event: PointerEvent) => {
+            this.handlePointerDown(event.clientX, event.clientY);
+        };
+        this.handleResizeBound = () => this.handleResize();
+        this.handleTouchStartBound = (event: TouchEvent) => {
+            let touch = event.changedTouches[0];
+            if (touch)
+                this.handlePointerDown(touch.clientX, touch.clientY);
+        };
+        this.onPlay = options.onPlay;
         this.selectableVehicles = [];
         this.stars = [];
         this.leftArrowPressedUntil = 0;
@@ -93,19 +115,7 @@ export default class MenuScene extends THREE.Scene {
         this.sounds = {
             "vehicle-select": new Audio("./assets/sounds/vehicle-select.wav")
         };
-
-        window.addEventListener("resize", () => this.handleResize(), false);
-        window.addEventListener("pointerdown", (event: PointerEvent) => {
-            this.handlePointerDown(event.clientX, event.clientY);
-        });
-        window.addEventListener("touchstart", (event: TouchEvent) => {
-            let touch = event.changedTouches[0];
-            if (touch)
-                this.handlePointerDown(touch.clientX, touch.clientY);
-        }, { passive: true });
-        window.addEventListener("keydown", (event: KeyboardEvent) => {
-            this.handleKeydown(event);
-        });
+        this.activate();
     }
 
     getLayout(): MenuLayout {
@@ -854,7 +864,7 @@ export default class MenuScene extends THREE.Scene {
         this.add(this.camera);
 
         this.renderer = new THREE.WebGLRenderer({
-            canvas: document.getElementById("menu") as HTMLCanvasElement,
+            canvas: this.canvas,
             alpha: true,
             antialias: true
         });
@@ -986,8 +996,9 @@ export default class MenuScene extends THREE.Scene {
             );
             let cameraProgress = this.clamp01((transitionElapsed - 120) / 760);
             let blackoutProgress = this.easeInCubic(
-                this.clamp01((transitionElapsed - 900) / 220),
+                this.clamp01((transitionElapsed - 620) / 300),
             );
+            let handoffReady = transitionElapsed >= 1000;
 
             this.applyMenuOverlayOpacity(1 - fadeProgress);
             this.updateTransitionCamera(layout, cameraProgress);
@@ -998,8 +1009,9 @@ export default class MenuScene extends THREE.Scene {
                 this.titleGroup.position.y = layout.titleY + fadeProgress * 0.18;
             }
 
-            if (blackoutProgress >= 1) {
-                window.location.href = `game.html?speeder=${this.transitionPlayableIndex}`;
+            if (handoffReady) {
+                this.transitionStart = 0;
+                this.onPlay?.(this.transitionPlayableIndex);
                 return;
             }
         } else {
@@ -1077,5 +1089,43 @@ export default class MenuScene extends THREE.Scene {
             let twinkle = 0.92 + Math.sin(now * star.driftSpeed * 1.8 + star.driftPhase) * 0.18;
             star.mesh.scale.setScalar(star.baseScale * twinkle);
         }
+    }
+
+    activate() {
+        if (this.active)
+            return;
+
+        this.active = true;
+        window.addEventListener("resize", this.handleResizeBound, false);
+        window.addEventListener("pointerdown", this.handlePointerDownBound);
+        window.addEventListener("touchstart", this.handleTouchStartBound, { passive: true });
+        window.addEventListener("keydown", this.handleKeydownBound);
+    }
+
+    deactivate() {
+        if (!this.active)
+            return;
+
+        this.active = false;
+        window.removeEventListener("resize", this.handleResizeBound, false);
+        window.removeEventListener("pointerdown", this.handlePointerDownBound);
+        window.removeEventListener("touchstart", this.handleTouchStartBound);
+        window.removeEventListener("keydown", this.handleKeydownBound);
+    }
+
+    reset() {
+        this.transitionStart = 0;
+        this.confirmPressedUntil = 0;
+        this.leftArrowPressedUntil = 0;
+        this.rightArrowPressedUntil = 0;
+        this.setCurtainOpacity(0);
+        this.selectVehicle(this.selectedIndex, false);
+        this.applyMenuOverlayOpacity(1);
+        this.updateLayout();
+    }
+
+    dispose() {
+        this.deactivate();
+        this.renderer?.dispose();
     }
 }

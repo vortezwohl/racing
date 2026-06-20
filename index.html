@@ -8,11 +8,41 @@
         <link rel="icon" type="image/svg+xml" href="./assets/favicon.ico" />
     </head>
     
-    <body id="menu-background">
-        <div id="curtain"></div>
+    <body>
+        <div id="app-shell">
+            <div id="curtain"></div>
 
-        <canvas id="menu"></canvas>
-        
-        <script type="application/javascript" src="./dist/index.bundle.js" ></script>
+            <section id="menu-view" class="app-view is-active">
+                <canvas id="menu"></canvas>
+            </section>
+
+            <section id="race-view" class="app-view" aria-hidden="true">
+                <div id="dashboard">
+                    <div id="counter">Lap 1/2</div>
+                    <div id="countdown"></div>
+                    <div id="timer">00:00:00</div>
+                </div>
+
+                <div id="joystick">
+                    <div id="knob"></div>
+                </div>
+
+                <div id="finish-screen">
+                    <div id="finish-text">You finished</div>
+
+                    <div id="finish-stats">
+                        <div id="finish-rank"></div>
+                        <div id="finish-stats-right">
+                            <div id="finish-rank-suffix"></div>
+                            <div id="finish-time"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <canvas id="game"></canvas>
+            </section>
+        </div>
+
+        <script type="application/javascript" src="./dist/app.bundle.js" ></script>
     </body>
 </html>

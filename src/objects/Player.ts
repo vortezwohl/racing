@@ -6,6 +6,7 @@ import Vehicle from "./Vehicle";
 
 export default class Player extends Vehicle {
     camera: THREE.PerspectiveCamera;
+    engineAudioContext: AudioContext;
     manualCamera: boolean = false;
     orbitals?: OrbitControls;
 
@@ -28,10 +29,10 @@ export default class Player extends Vehicle {
         };
 
         // map engine sound frequency based on velocity
-        let context = new AudioContext();
-        this.engineSound = context.createOscillator();
+        this.engineAudioContext = new AudioContext();
+        this.engineSound = this.engineAudioContext.createOscillator();
         this.engineSound.type = "triangle";
-        this.engineSound.connect(context.destination);
+        this.engineSound.connect(this.engineAudioContext.destination);
         this.engineSound.frequency.value = 0;
         this.engineSound.start();
     }
@@ -99,11 +100,11 @@ export default class Player extends Vehicle {
             this.rotation.z *= 0.8;            
     }
 
-    handleOutOfBounds() {
+    handleOutOfBounds(track: Track) {
         if (this.laps > 2)
             return;
 
-        super.handleOutOfBounds(true);
+        super.handleOutOfBounds(track, true);
     }
 
     update(track: Track, dt?: number, keysPressed?: Controls) {
@@ -113,5 +114,15 @@ export default class Player extends Vehicle {
         this.handleInput(keysPressed, dt);        
         super.update(track, dt);
         this.handleCameraMovement(!keysPressed["r"], this.isAlive);
+    }
+
+    disposeAudio() {
+        try {
+            this.engineSound.stop();
+        } catch (_error) {
+            // engineSound may already be stopped during repeated disposal
+        }
+
+        void this.engineAudioContext.close();
     }
 }

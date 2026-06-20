@@ -25,6 +25,8 @@ export default class Vehicle {
 
     model: THREE.Group;
     hitbox: THREE.Mesh<THREE.BoxGeometry, THREE.MeshBasicMaterial>;
+    outOfBoundsRecoverTimeout?: number;
+    outOfBoundsScrollTimeout?: number;
 
     isAlive: boolean;
 
@@ -209,9 +211,9 @@ export default class Vehicle {
 
                                 if (player) {
                                     this.sounds["complete-lap"]?.play();
-
-                                    document.getElementById("counter").innerHTML = 
-                                        `Lap ${this.laps.toString()}/2`;
+                                    let raceUi = track.body.parent?.userData.raceUi;
+                                    if (raceUi?.counter)
+                                        raceUi.counter.innerHTML = `Lap ${this.laps.toString()}/2`;
                                 }
                             }
                             
@@ -270,11 +272,12 @@ export default class Vehicle {
             this.upDebug.update(this.hitbox.up, this.position.clone());
     }
 
-    handleOutOfBounds(player?: boolean) {
+    handleOutOfBounds(track: Track, player?: boolean) {
         // reset vehicle to last checkpoint if it falls out of bounds        
         if (this.position.y < -30 || !this.isAlive) {            
-            let curtain = document.getElementById("curtain");
-            if (player)
+            let raceUi = track.body.parent?.userData.raceUi;
+            let curtain = raceUi?.curtain;
+            if (player && curtain)
                 curtain.classList.add("fade-to-black");
 
             if (this.isAlive) {
@@ -282,24 +285,38 @@ export default class Vehicle {
 
                 this.sounds["out-of-bounds"]?.play();
 
-                setTimeout(() => {
+                this.outOfBoundsRecoverTimeout = window.setTimeout(() => {
                     this.resetToCheckpoint(this.checkpoint);
                     this.isAlive = true;
 
-                    if (player) {
+                    if (player && curtain) {
                         curtain.classList.remove("fade-to-black");
-                        curtain.style.opacity = "100";
+                        curtain.style.opacity = "1";
+                        curtain.style.height = "100vh";
                         curtain.classList.add("scroll-up");
                     }
                     
-                    setTimeout(() => {
-                        if (player) {
+                    this.outOfBoundsScrollTimeout = window.setTimeout(() => {
+                        if (player && curtain) {
                             curtain.classList.remove("scroll-up");
                             curtain.style.opacity = "0";
+                            curtain.style.height = "100vh";
                         }
-                    }, 1000)
+                    }, 1000);
                 }, 900);
             } 
+        }
+    }
+
+    clearPendingTimeouts() {
+        if (this.outOfBoundsRecoverTimeout) {
+            window.clearTimeout(this.outOfBoundsRecoverTimeout);
+            this.outOfBoundsRecoverTimeout = undefined;
+        }
+
+        if (this.outOfBoundsScrollTimeout) {
+            window.clearTimeout(this.outOfBoundsScrollTimeout);
+            this.outOfBoundsScrollTimeout = undefined;
         }
     }
 
@@ -323,6 +340,6 @@ export default class Vehicle {
         this.gravity = this.defaultGravity;
         this.handleTrackCollision(track);        
         this.handleVehicleMovement();
-        this.handleOutOfBounds();
+        this.handleOutOfBounds(track);
     }
 }

@@ -101,14 +101,45 @@ interface MenuLayout {
     vehicleY: number;
 }
 
+interface MenuSceneOptions {
+    canvas: HTMLCanvasElement;
+    curtain: HTMLElement;
+    onPlay?: (speederIndex: number) => void;
+}
+
+interface RaceUi {
+    backgroundHost: HTMLElement;
+    counter: HTMLElement;
+    countdown: HTMLElement;
+    curtain: HTMLElement;
+    dashboard: HTMLElement;
+    finishRank: HTMLElement;
+    finishRankSuffix: HTMLElement;
+    finishScreen: HTMLElement;
+    finishTime: HTMLElement;
+    joystick: HTMLElement;
+    knob: HTMLElement;
+    timer: HTMLElement;
+}
+
+interface GameSceneOptions {
+    canvas: HTMLCanvasElement;
+    debug?: boolean;
+    speederIndex: number;
+    ui: RaceUi;
+}
+
 export {
     Controls,
     CurveData,
     LayerData,
+    GameSceneOptions,
     MenuLayout,
+    MenuSceneOptions,
     Platform,
     CheckpointData,
     Checkpoint,
+    RaceUi,
     TrackData,
     VehicleData
 }

@@ -1,8 +1,37 @@
-#menu-background {
+#app-shell {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+}
+
+.app-view {
+    position: absolute;
+    inset: 0;
+    display: none;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    pointer-events: none;
+    visibility: hidden;
+}
+
+.app-view.is-active {
+    display: block;
+    opacity: 1;
+    pointer-events: auto;
+    visibility: visible;
+}
+
+#menu-view {
     width: 100vw;
     height: 100vh;
     background:
         radial-gradient(circle at 20% 20%, rgba(53, 80, 140, 0.3), transparent 24%),
         radial-gradient(circle at 80% 10%, rgba(106, 54, 135, 0.25), transparent 22%),
         linear-gradient(180deg, #03040c 0%, #05081a 55%, #020208 100%);
+}
+
+#race-view {
+    width: 100vw;
+    height: 100vh;
 }

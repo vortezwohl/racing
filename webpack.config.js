@@ -3,8 +3,7 @@ const path = require("path");
 module.exports = {
     mode: "none",
     entry: {
-        index: "./src/index.ts",
-        game: "./src/game.ts"
+        app: "./src/app.ts"
     },
     
     output: {

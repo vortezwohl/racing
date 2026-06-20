@@ -8,7 +8,7 @@ import { ConvexGeometry } from "three/examples/jsm/geometries/ConvexGeometry"
 import { CPU, Player, Track, Vehicle } from "../objects/objects";
 import { Satellite } from "../decorations/decorations";
 import { randomVector } from "../utils/geometry";
-import { Controls } from "../utils/interfaces";
+import { Controls, GameSceneOptions, RaceUi } from "../utils/interfaces";
 import { tracks } from "../../data/tracks/tracks";
 import { speeders, bike, mustang } from "../../data/vehicles/vehicles";
 
@@ -43,6 +43,9 @@ type FloatingCluster = {
 };
 
 export default class GameScene extends THREE.Scene {
+    active: boolean;
+    canvas: HTMLCanvasElement;
+    debugMode: boolean;
     debugger: GUI;
 
     camera: THREE.PerspectiveCamera;
@@ -66,28 +69,37 @@ export default class GameScene extends THREE.Scene {
     CPUs: Array<Vehicle>;
 
     countdown: number;
+    fadeInTimeout?: number;
     finished: boolean;
+    finishScreenTimeout?: number;
+    handleKeyDownBound: (e: KeyboardEvent) => void;
+    handleKeyUpBound: (e: KeyboardEvent) => void;
+    handleResizeBound: () => void;
+    handleKnobTouchEndBound?: () => void;
+    handleKnobTouchMoveBound?: (e: TouchEvent) => void;
 
     sounds: { [key: string]: HTMLAudioElement };
+    ui: RaceUi;
 
-    constructor(speederIndex: number, debug?: boolean) {
+    constructor(options: GameSceneOptions) {
         super();
 
+        this.active = false;
+        this.canvas = options.canvas;
+        this.debugMode = !!options.debug;
+        this.ui = options.ui;
+        this.userData.raceUi = this.ui;
         this.width = window.innerWidth;
         this.height = window.innerHeight;
         this.floatingClusters = [];
         this.nebulaGlows = [];
-
-        this.render(speederIndex, debug);
-
-        // set up utilities
-        // set up controls
-        let isTouchDevice = "ontouchstart" in window || 
-            navigator.maxTouchPoints > 0;
-        this.setupControls(isTouchDevice);
-
-        // set up window resizing
-        window.addEventListener("resize", () => {
+        this.handleKeyDownBound = (e: KeyboardEvent) => {
+            this.keysPressed[e.key.toLowerCase()] = true;
+        };
+        this.handleKeyUpBound = (e: KeyboardEvent) => {
+            this.keysPressed[e.key.toLowerCase()] = false;
+        };
+        this.handleResizeBound = () => {
             this.width = window.innerWidth;
             this.height = window.innerHeight;
 
@@ -95,7 +107,15 @@ export default class GameScene extends THREE.Scene {
             this.camera.updateProjectionMatrix();
             this.renderer.setSize(this.width, this.height);
             this.filter.setSize(this.width, this.height);
-        }, false);
+        };
+
+        this.render(options.speederIndex, options.debug);
+
+        // set up utilities
+        // set up controls
+        let isTouchDevice = "ontouchstart" in window || 
+            navigator.maxTouchPoints > 0;
+        this.setupControls(isTouchDevice);
 
         this.countdown = 0;
         this.finished = false;
@@ -104,10 +124,24 @@ export default class GameScene extends THREE.Scene {
             "countdown": new Audio("./assets/sounds/countdown.wav"),
             "countdown-start": new Audio("./assets/sounds/countdown-start.wav")
         }
+    }
 
-        setTimeout(() => {
-            document.getElementById("curtain").classList.remove("fade-in");
-        }, 5000);
+    resetUi() {
+        this.ui.counter.innerHTML = "Lap 1/2";
+        this.ui.countdown.innerHTML = "";
+        this.ui.timer.innerHTML = "00:00:00";
+        this.ui.dashboard.style.display = "block";
+        this.ui.finishScreen.style.display = "none";
+        this.ui.finishRank.innerHTML = "";
+        this.ui.finishRankSuffix.innerHTML = "";
+        this.ui.finishTime.innerHTML = "";
+        this.ui.joystick.style.display = "none";
+        this.ui.curtain.classList.remove("fade-to-black", "long-fade-to-black", "scroll-up");
+        this.ui.curtain.classList.add("fade-in");
+        this.ui.curtain.style.opacity = "1";
+        this.ui.curtain.style.height = "100vh";
+        this.ui.knob.style.top = "5vw";
+        this.ui.knob.style.left = "5vw";
     }
 
     setupBackgroundEntities(number: number = 5000, 
@@ -559,7 +593,7 @@ export default class GameScene extends THREE.Scene {
 
         // set up renderer
         this.renderer = new THREE.WebGLRenderer({
-            canvas: document.getElementById("game") as HTMLCanvasElement,
+            canvas: this.canvas,
             alpha: true
         });
 
@@ -654,17 +688,9 @@ export default class GameScene extends THREE.Scene {
         // set up keyboard controls
         this.keysPressed = {};
 
-        window.addEventListener("keydown", (e: KeyboardEvent) => {
-            this.keysPressed[e.key.toLowerCase()] = true;
-        });
-
-        window.addEventListener("keyup", (e: KeyboardEvent) => {
-            this.keysPressed[e.key.toLowerCase()] = false;
-        });
-
         // hide joystick if not touch device
         if (!isTouchDevice) {
-            document.getElementById("joystick").style.display = "none";
+            this.ui.joystick.style.display = "none";
             return;
         }
 
@@ -681,8 +707,8 @@ export default class GameScene extends THREE.Scene {
         // keep track of all keys so they can be reset in the touch handler
         let controlKeys = ["w", "a", "s", "d", "shift"];
         
-        let knob = document.getElementById("knob");
-        knob.addEventListener("touchmove", (e: TouchEvent) => {
+        let knob = this.ui.knob;
+        this.handleKnobTouchMoveBound = (e: TouchEvent) => {
             e.preventDefault();
             
             for (let key of controlKeys)
@@ -714,23 +740,25 @@ export default class GameScene extends THREE.Scene {
             let top = 5 + r * Math.sin(a) / vw + "vw";
             let left = 5 + r * Math.cos(a) / vw + "vw";
             
-            document.getElementById("knob").style.top = top;
-            document.getElementById("knob").style.left = left;
-        }, false);
+            this.ui.knob.style.top = top;
+            this.ui.knob.style.left = left;
+        };
+        knob.addEventListener("touchmove", this.handleKnobTouchMoveBound, false);
 
         // reset knob position
-        knob.addEventListener("touchend", () => {
+        this.handleKnobTouchEndBound = () => {
             for (let key of controlKeys)
                 this.keysPressed[key] = false;
 
-            document.getElementById("knob").style.top = "5vw";
-            document.getElementById("knob").style.left = "5vw";
-        }, false);
+            this.ui.knob.style.top = "5vw";
+            this.ui.knob.style.left = "5vw";
+        };
+        knob.addEventListener("touchend", this.handleKnobTouchEndBound, false);
         
     }
 
     handleCountdown() {
-        let countdown = document.getElementById("countdown");
+        let countdown = this.ui.countdown;
         if (this.countdown < 3000 || this.countdown > 7000)
             return countdown.innerHTML = "";
 
@@ -748,28 +776,27 @@ export default class GameScene extends THREE.Scene {
 
     handleRaceFinish() {
         if (!this.finished) {
-            document.getElementById("curtain").classList.add("long-fade-to-black");
+            this.ui.curtain.classList.add("long-fade-to-black");
             
             let rank = 1;
             for (let cpu of this.CPUs)
             if (cpu.laps > 2)
             rank++;
             
-            ["dashboard", "joystick"].forEach((id: string) => {
-                document.getElementById(id).style.display = "none";
-            });
+            this.ui.dashboard.style.display = "none";
+            this.ui.joystick.style.display = "none";
             
-            setTimeout(() => {            
+            this.finishScreenTimeout = window.setTimeout(() => {            
                 this.player.sounds["complete-race"]?.play();
                 this.player.engineSound.stop();
                 
-                document.getElementById("finish-screen").style.display = "flex";
+                this.ui.finishScreen.style.display = "flex";
 
                 let suffixes = ["st", "nd", "rd"]
-                document.getElementById("finish-rank").innerHTML = rank.toString();
-                document.getElementById("finish-rank-suffix").innerHTML = suffixes[rank - 1];
+                this.ui.finishRank.innerHTML = rank.toString();
+                this.ui.finishRankSuffix.innerHTML = suffixes[rank - 1];
 
-                document.getElementById("finish-time").innerHTML = 
+                this.ui.finishTime.innerHTML = 
                     `Time: ${this.track.getTimeString()}`;
             }, 3200);
 
@@ -847,5 +874,69 @@ export default class GameScene extends THREE.Scene {
 
         for (let cpu of this.CPUs)
             cpu.update(this.track, dt);
+    }
+
+    activate() {
+        if (this.active)
+            return;
+
+        this.active = true;
+        this.resetUi();
+        if (this.fadeInTimeout)
+            window.clearTimeout(this.fadeInTimeout);
+        this.fadeInTimeout = window.setTimeout(() => {
+            this.ui.curtain.classList.remove("fade-in");
+            this.ui.curtain.style.opacity = "0";
+        }, 650);
+        let isTouchDevice = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+        this.ui.dashboard.style.display = "block";
+        this.ui.joystick.style.display = isTouchDevice ? "block" : "none";
+        window.addEventListener("resize", this.handleResizeBound, false);
+        window.addEventListener("keydown", this.handleKeyDownBound);
+        window.addEventListener("keyup", this.handleKeyUpBound);
+    }
+
+    deactivate() {
+        if (!this.active)
+            return;
+
+        this.active = false;
+        this.keysPressed = {};
+        this.ui.dashboard.style.display = "none";
+        this.ui.joystick.style.display = "none";
+        window.removeEventListener("resize", this.handleResizeBound, false);
+        window.removeEventListener("keydown", this.handleKeyDownBound);
+        window.removeEventListener("keyup", this.handleKeyUpBound);
+    }
+
+    dispose() {
+        this.deactivate();
+
+        if (this.fadeInTimeout)
+            window.clearTimeout(this.fadeInTimeout);
+        if (this.finishScreenTimeout)
+            window.clearTimeout(this.finishScreenTimeout);
+        if (this.handleKnobTouchMoveBound)
+            this.ui.knob.removeEventListener("touchmove", this.handleKnobTouchMoveBound, false);
+        if (this.handleKnobTouchEndBound)
+            this.ui.knob.removeEventListener("touchend", this.handleKnobTouchEndBound, false);
+
+        this.ui.finishScreen.style.display = "none";
+        this.ui.countdown.innerHTML = "";
+        this.ui.curtain.classList.remove("fade-in", "fade-to-black", "long-fade-to-black", "scroll-up");
+        this.ui.curtain.style.opacity = "0";
+        this.ui.curtain.style.height = "100vh";
+
+        this.player?.clearPendingTimeouts();
+        this.player?.disposeAudio?.();
+        for (let cpu of this.CPUs || [])
+            cpu.clearPendingTimeouts();
+        Object.values(this.sounds || {}).forEach((sound) => {
+            sound.pause();
+            sound.currentTime = 0;
+        });
+        this.orbitals?.dispose();
+        this.renderer?.dispose();
+        this.clear();
     }
 }

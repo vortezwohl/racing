@@ -206,8 +206,9 @@ export default class Track {
         // set up background gradient
         let background = trackData.backgroundStyle ||
             `linear-gradient(${trackData.backgroundColors.join(", ")})`;
-        document.getElementsByTagName("body")[0].style
-            .background = background;
+        let raceUi = scene.userData.raceUi;
+        if (raceUi?.backgroundHost)
+            raceUi.backgroundHost.style.background = background;
         
         // set up grid
         if (trackData.gridColor) {
@@ -220,14 +221,14 @@ export default class Track {
         this.movingPlatforms = [];
         
         // make collision layer invisible and above the road
-        let collisionLayer = trackData.layerData.shift();
+        let [collisionLayer, ...visibleLayers] = trackData.layerData;
         this.body = this.createTrack(trackData.curveData, 
             collisionLayer, debug, scene);
         scene.add(this.body);
         
         // add all layers
         // e.g. surface layer and outline layer
-        for (let layerData of trackData.layerData) {
+        for (let layerData of visibleLayers) {
             let layer = this.createTrack(trackData.curveData,
                 layerData, debug, scene);
             scene.add(layer);
@@ -260,7 +261,9 @@ export default class Track {
             return;
 
         this.elapsedTime += dt;
-        document.getElementById("timer").innerHTML = this.getTimeString();
+        let raceUi = this.body.parent?.userData.raceUi;
+        if (raceUi?.timer)
+            raceUi.timer.innerHTML = this.getTimeString();
         
         for (let platform of this.movingPlatforms) {
             let time = (this.elapsedTime + platform.phase) % platform.period;
