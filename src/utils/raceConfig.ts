@@ -24,10 +24,20 @@ const raceCamera = {
 };
 
 const raceTrail = {
-    maxLength: 8,
-    minLength: 2.5,
-    sampleCount: 28,
-    zoneRadius: 1.25,
+    fadeEndDistance: 3,
+    fadeStartDistance: 8,
+    flowSpeed: 0.006,
+    glowOpacity: 0.1,
+    glowWidth: 1.32,
+    maxLength: 42,
+    maxMarkerOpacity: 1,
+    minLength: 14,
+    minMarkerOpacity: 0.04,
+    opacity: 0.42,
+    sampleCount: 72,
+    coreWidth: 0.56,
+    wobbleStrength: 0.09,
+    zoneRadius: 2.1,
 };
 
 const raceCollision = {
