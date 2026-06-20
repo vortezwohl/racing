@@ -1,23 +1,31 @@
 import * as THREE from "three";
 import { ConvexGeometry } from "three/examples/jsm/geometries/ConvexGeometry";
-import { GLTF, GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass";
-import { Satellite } from "../decorations/decorations";
 import { randomVector } from "../utils/geometry";
 import { MenuLayout } from "../utils/interfaces";
 import { menuVehicles, MenuVehicle } from "../../data/vehicles/vehicles";
 
 type SelectableVehicle = {
-    baseY: number;
-    checkMark: THREE.Sprite;
+    baseScale: number;
     group: THREE.Group;
-    hitArea: THREE.Mesh;
     index: number;
     labelSprite: THREE.Sprite;
     menuVehicle: MenuVehicle;
-    pedestal: THREE.Group;
+};
+
+type MenuStar = {
+    baseScale: number;
+    depth: number;
+    driftAmplitude: THREE.Vector2;
+    driftPhase: number;
+    driftSpeed: number;
+    mesh: THREE.Mesh;
+    normalizedAnchor: THREE.Vector2;
+    origin: THREE.Vector3;
+    rotationRate: THREE.Vector3;
 };
 
 export default class MenuScene extends THREE.Scene {
@@ -26,9 +34,9 @@ export default class MenuScene extends THREE.Scene {
     composer: EffectComposer;
     filter: UnrealBloomPass;
 
+    backgroundRoot: THREE.Group;
     selectableVehicles: Array<SelectableVehicle>;
-    satellites: Array<Satellite>;
-    stars: Array<THREE.Mesh>;
+    stars: Array<MenuStar>;
 
     titleGroup: THREE.Group;
     titleSprite: THREE.Sprite;
@@ -36,6 +44,14 @@ export default class MenuScene extends THREE.Scene {
     subtitleSprite: THREE.Sprite;
     titleBaseScale: THREE.Vector3;
     subtitleBaseScale: THREE.Vector3;
+    leftArrowGroup: THREE.Group;
+    leftArrowSprite: THREE.Sprite;
+    leftArrowShadowSprite: THREE.Sprite;
+    leftArrowBaseScale: THREE.Vector3;
+    rightArrowGroup: THREE.Group;
+    rightArrowSprite: THREE.Sprite;
+    rightArrowShadowSprite: THREE.Sprite;
+    rightArrowBaseScale: THREE.Vector3;
     confirmButtonGroup: THREE.Group;
     confirmButtonSprite: THREE.Sprite;
     confirmButtonShadowSprite: THREE.Sprite;
@@ -47,6 +63,8 @@ export default class MenuScene extends THREE.Scene {
     raycaster: THREE.Raycaster;
     pointer: THREE.Vector2;
     selectedIndex: number;
+    leftArrowPressedUntil: number;
+    rightArrowPressedUntil: number;
 
     sounds: { [key: string]: HTMLAudioElement };
 
@@ -58,9 +76,11 @@ export default class MenuScene extends THREE.Scene {
         this.selectedIndex = 0;
         this.pointer = new THREE.Vector2();
         this.raycaster = new THREE.Raycaster();
+        this.backgroundRoot = new THREE.Group();
         this.selectableVehicles = [];
-        this.satellites = [];
         this.stars = [];
+        this.leftArrowPressedUntil = 0;
+        this.rightArrowPressedUntil = 0;
 
         this.render();
 
@@ -85,36 +105,51 @@ export default class MenuScene extends THREE.Scene {
     getLayout(): MenuLayout {
         if (this.width < 640) {
             return {
-                vehicleSpacing: 2.8,
-                cameraZoom: 0.92,
+                cameraZoom: 0.82,
+                confirmButtonScale: 0.82,
+                confirmY: -7.1,
+                labelY: -3.7,
+                arrowOffsetX: 4.05,
+                arrowScale: 0.56,
+                subtitleY: -1.58,
                 titleScale: 2.9,
-                titleY: 6.3,
-                titleX: 0,
-                titleLetterSpacing: 140,
-                titlePulseAmplitude: 0.12
+                titleY: 6.6,
+                titlePulseAmplitude: 0.08,
+                vehicleBaseScale: 1.04,
+                vehicleY: 0.5
             };
         }
 
         if (this.width < 1024) {
             return {
-                vehicleSpacing: 3.15,
-                cameraZoom: 0.9,
+                cameraZoom: 0.84,
+                confirmButtonScale: 0.92,
+                confirmY: -6.75,
+                labelY: -3.62,
+                arrowOffsetX: 5.45,
+                arrowScale: 0.68,
+                subtitleY: -1.82,
                 titleScale: 3.7,
                 titleY: 6.6,
-                titleX: 0,
-                titleLetterSpacing: 150,
-                titlePulseAmplitude: 0.1
+                titlePulseAmplitude: 0.07,
+                vehicleBaseScale: 1.08,
+                vehicleY: 0.28
             };
         }
 
         return {
-            vehicleSpacing: 3.75,
             cameraZoom: 0.88,
+            confirmButtonScale: 1,
+            confirmY: -6.25,
+            labelY: -3.48,
+            arrowOffsetX: 8.15,
+            arrowScale: 0.94,
+            subtitleY: -2.02,
             titleScale: 4.5,
             titleY: 6.9,
-            titleX: 0,
-            titleLetterSpacing: 160,
-            titlePulseAmplitude: 0.08
+            titlePulseAmplitude: 0.06,
+            vehicleBaseScale: 1.18,
+            vehicleY: 0.12
         };
     }
 
@@ -165,10 +200,10 @@ export default class MenuScene extends THREE.Scene {
         context.textAlign = "center";
         context.textBaseline = "middle";
         context.font = '900 88px "Trebuchet MS", "Verdana", sans-serif';
-        context.lineWidth = 18;
-        context.strokeStyle = glowStyle;
+        context.lineWidth = 4;
+        context.strokeStyle = shadowStyle;
         context.strokeText(text, canvas.width / 2, canvas.height / 2 + 4);
-        context.fillStyle = "#fff9f1";
+        context.fillStyle = "#efc57e";
         context.fillText(text, canvas.width / 2, canvas.height / 2 + 4);
 
         let texture = new THREE.CanvasTexture(canvas);
@@ -203,7 +238,7 @@ export default class MenuScene extends THREE.Scene {
         context.font = `${fontWeight} ${fontSize}px "Trebuchet MS", "Verdana", sans-serif`;
 
         if (shadowStyle) {
-            context.lineWidth = 30;
+            context.lineWidth = Math.max(6, Math.floor(fontSize * 0.08));
             context.strokeStyle = shadowStyle;
             context.strokeText(text, canvas.width / 2, canvas.height / 2);
         }
@@ -223,28 +258,51 @@ export default class MenuScene extends THREE.Scene {
         return sprite;
     }
 
-    createCheckMark(accentColor: number): THREE.Sprite {
+    createVehicleLabel(vehicle: MenuVehicle): THREE.Sprite {
+        return this.createTextSprite(
+            vehicle.label,
+            vehicle.titleColor,
+            undefined,
+            64,
+            2.15,
+            "800",
+        );
+    }
+
+    createArrowSprite(
+        direction: "left" | "right",
+        fillStyle: string,
+        shadowStyle: string,
+    ): THREE.Sprite {
         let canvas = document.createElement("canvas");
         let context = canvas.getContext("2d");
         if (!context)
-            throw new Error("Unable to create check mark canvas.");
+            throw new Error("Unable to create arrow canvas.");
 
-        canvas.width = 256;
-        canvas.height = 256;
-
+        canvas.width = 360;
+        canvas.height = 360;
         context.clearRect(0, 0, canvas.width, canvas.height);
-        context.fillStyle = "#0d1020";
+
+        let horizontalInset = 102;
+        let tipOffset = direction === "left" ? -1 : 1;
+
+        context.fillStyle = shadowStyle;
         context.beginPath();
-        context.arc(128, 128, 84, 0, Math.PI * 2);
+        context.moveTo(180 + tipOffset * 108, 180);
+        context.lineTo(180 - tipOffset * horizontalInset, 82);
+        context.lineTo(180 - tipOffset * 58, 180);
+        context.lineTo(180 - tipOffset * horizontalInset, 278);
+        context.closePath();
         context.fill();
 
-        context.lineWidth = 20;
-        context.strokeStyle = `#${accentColor.toString(16).padStart(6, "0")}`;
+        context.fillStyle = fillStyle;
         context.beginPath();
-        context.moveTo(78, 132);
-        context.lineTo(114, 168);
-        context.lineTo(182, 94);
-        context.stroke();
+        context.moveTo(180 + tipOffset * 88, 180);
+        context.lineTo(180 - tipOffset * (horizontalInset - 18), 102);
+        context.lineTo(180 - tipOffset * 42, 180);
+        context.lineTo(180 - tipOffset * (horizontalInset - 18), 258);
+        context.closePath();
+        context.fill();
 
         let texture = new THREE.CanvasTexture(canvas);
         let material = new THREE.SpriteMaterial({
@@ -253,64 +311,8 @@ export default class MenuScene extends THREE.Scene {
             depthWrite: false
         });
         let sprite = new THREE.Sprite(material);
-        sprite.scale.set(1.2, 1.2, 1);
-        sprite.visible = false;
+        sprite.scale.set(2.85, 2.85, 1);
         return sprite;
-    }
-
-    createPedestal(accentColor: number): THREE.Group {
-        let group = new THREE.Group();
-
-        let baseGeometry = new THREE.CylinderGeometry(1.5, 1.9, 0.42, 40);
-        let baseMaterial = new THREE.MeshBasicMaterial({ color: 0xf8f9ff });
-        let base = new THREE.Mesh(baseGeometry, baseMaterial);
-        base.position.y = -1.15;
-        group.add(base);
-
-        let rimGeometry = new THREE.TorusGeometry(1.46, 0.14, 18, 50);
-        let rimMaterial = new THREE.MeshBasicMaterial({ color: accentColor });
-        let rim = new THREE.Mesh(rimGeometry, rimMaterial);
-        rim.rotation.x = Math.PI / 2;
-        rim.position.y = -0.92;
-        group.add(rim);
-
-        let glowGeometry = new THREE.CircleGeometry(1.45, 32);
-        let glowMaterial = new THREE.MeshBasicMaterial({
-            color: accentColor,
-            transparent: true,
-            opacity: 0.38
-        });
-        let glow = new THREE.Mesh(glowGeometry, glowMaterial);
-        glow.rotation.x = -Math.PI / 2;
-        glow.position.y = -0.91;
-        group.add(glow);
-
-        return group;
-    }
-
-    createHitArea(index: number): THREE.Mesh {
-        let geometry = new THREE.SphereGeometry(1.95, 18, 18);
-        let material = new THREE.MeshBasicMaterial({
-            color: 0xffffff,
-            transparent: true,
-            opacity: 0.001,
-            depthWrite: false
-        });
-        let hitArea = new THREE.Mesh(geometry, material);
-        hitArea.position.set(0, -0.1, 1.1);
-        hitArea.userData.menuVehicleIndex = index;
-        return hitArea;
-    }
-
-    createVehicleLabel(vehicle: MenuVehicle): THREE.Sprite {
-        return this.createTextSprite(
-            vehicle.label,
-            vehicle.titleColor,
-            vehicle.titleShadowColor,
-            64,
-            2.3,
-            "800",
-        );
     }
 
     createTitleGroup() {
@@ -318,19 +320,19 @@ export default class MenuScene extends THREE.Scene {
 
         this.titleShadowSprite = this.createTextSprite(
             "Pick Your Racer!",
-            "#31134d",
+            "#2a1808",
             undefined,
             120,
             6.5,
             "900",
         );
-        this.titleShadowSprite.position.set(0.16, -0.12, -0.1);
+        this.titleShadowSprite.position.set(0.12, -0.08, -0.1);
         this.titleGroup.add(this.titleShadowSprite);
 
         this.titleSprite = this.createTextSprite(
             "Pick Your Racer!",
-            "#ffd07a",
-            "#915819",
+            "#efc883",
+            "#8f6132",
             120,
             6.5,
             "900",
@@ -339,23 +341,68 @@ export default class MenuScene extends THREE.Scene {
         this.titleBaseScale = this.titleSprite.scale.clone();
 
         this.subtitleSprite = this.createTextSprite(
-            "Tap a ship to choose it.",
-            "#b8d7ff",
-            "#25314f",
+            "Use the arrows to browse ships.",
+            "#96a9c4",
+            undefined,
             56,
             2.7,
             "700",
         );
-        this.subtitleSprite.position.set(0, -2.1, 0.1);
+        this.subtitleSprite.position.set(0, -2.02, 0.1);
         this.titleGroup.add(this.subtitleSprite);
         this.subtitleBaseScale = this.subtitleSprite.scale.clone();
 
         this.add(this.titleGroup);
     }
 
+    createArrowControls() {
+        this.leftArrowGroup = new THREE.Group();
+        this.leftArrowShadowSprite = this.createArrowSprite(
+            "left",
+            "#4b2b0f",
+            "#241206",
+        );
+        this.leftArrowShadowSprite.position.set(-0.08, -0.08, -0.1);
+        this.leftArrowGroup.add(this.leftArrowShadowSprite);
+
+        this.leftArrowSprite = this.createArrowSprite(
+            "left",
+            "#f2be68",
+            "#7f4b1f",
+        );
+        this.leftArrowGroup.add(this.leftArrowSprite);
+        this.leftArrowBaseScale = this.leftArrowSprite.scale.clone();
+
+        this.leftArrowGroup.userData.action = "prev";
+        this.leftArrowSprite.userData.action = "prev";
+        this.leftArrowShadowSprite.userData.action = "prev";
+        this.add(this.leftArrowGroup);
+
+        this.rightArrowGroup = new THREE.Group();
+        this.rightArrowShadowSprite = this.createArrowSprite(
+            "right",
+            "#4b2b0f",
+            "#241206",
+        );
+        this.rightArrowShadowSprite.position.set(0.08, -0.08, -0.1);
+        this.rightArrowGroup.add(this.rightArrowShadowSprite);
+
+        this.rightArrowSprite = this.createArrowSprite(
+            "right",
+            "#f2be68",
+            "#7f4b1f",
+        );
+        this.rightArrowGroup.add(this.rightArrowSprite);
+        this.rightArrowBaseScale = this.rightArrowSprite.scale.clone();
+
+        this.rightArrowGroup.userData.action = "next";
+        this.rightArrowSprite.userData.action = "next";
+        this.rightArrowShadowSprite.userData.action = "next";
+        this.add(this.rightArrowGroup);
+    }
+
     createConfirmButton() {
         this.confirmButtonGroup = new THREE.Group();
-        this.confirmButtonGroup.position.set(0, this.width < 980 ? -8.2 : -6.55, 0);
 
         this.confirmButtonShadowSprite = this.createButtonSprite(
             "Confirm",
@@ -385,28 +432,18 @@ export default class MenuScene extends THREE.Scene {
     getContentZoom(layout: MenuLayout): number {
         let halfVisibleWidth = this.width / 180;
         let halfVisibleHeight = this.height / 180;
-
-        let rowSizes = this.getVehicleRowSizes(layout);
-        let maxRowWidth = Math.max(...rowSizes.map(row => {
-            if (row.count === 0)
-                return 0;
-
-            return (row.count - 1) * layout.vehicleSpacing + row.vehicleWidth;
-        }));
-
         let titleWidth = layout.titleScale * 3.7;
-        let subtitleWidth = layout.titleScale * 1.32;
+        let subtitleWidth = layout.titleScale * 1.72;
+        let arrowSpread = layout.arrowOffsetX + 1.8;
         let requiredHalfWidth = Math.max(
-            maxRowWidth / 2 + 1.4,
+            arrowSpread + 1.6,
             titleWidth / 2 + 0.9,
             subtitleWidth / 2 + 0.6,
         );
 
-        let useTwoRows = this.shouldUseTwoRows();
         let titleTop = layout.titleY + layout.titleScale / 2;
-        let subtitleBottom = layout.titleY - 2.1 - layout.titleScale * 0.18;
-        let confirmButtonY = this.width < 980 ? -8.2 : -6.55;
-        let bottomY = useTwoRows ? Math.min(-6.6, confirmButtonY - 1.2) : Math.min(-4.6, confirmButtonY - 1.2);
+        let subtitleBottom = layout.titleY + layout.subtitleY - layout.titleScale * 0.1;
+        let bottomY = Math.min(layout.labelY - 0.7, layout.confirmY - 1.2);
         let requiredHalfHeight = Math.max(
             titleTop + 0.8,
             Math.abs(bottomY) + 1.6,
@@ -419,59 +456,91 @@ export default class MenuScene extends THREE.Scene {
         return Math.max(0.45, safeZoom);
     }
 
-    getVehicleRowSizes(layout: MenuLayout): Array<{ count: number; vehicleWidth: number }> {
-        if (this.shouldUseTwoRows()) {
-            return [
-                { count: 3, vehicleWidth: 2.8 },
-                { count: 2, vehicleWidth: 2.8 }
-            ];
-        }
-
-        return [
-            { count: this.selectableVehicles.length, vehicleWidth: 2.8 }
-        ];
+    getVisibleHalfSize(layout: MenuLayout = this.getLayout()): THREE.Vector2 {
+        let zoom = this.getContentZoom(layout);
+        return new THREE.Vector2(
+            this.width / 180 / zoom,
+            this.height / 180 / zoom,
+        );
     }
 
-    shouldUseTwoRows(): boolean {
-        return this.width < 980;
-    }
+    setupBackgroundEntities(number: number = 180) {
+        if (this.backgroundRoot.parent)
+            this.backgroundRoot.parent.remove(this.backgroundRoot);
 
-    setupBackgroundEntities(number: number = 1800, distance: number = 220, offset: number = 80) {
-        this.satellites = [];
+        this.backgroundRoot = new THREE.Group();
+        this.backgroundRoot.position.set(0, 0, 0);
+        this.backgroundRoot.renderOrder = -10;
+        this.add(this.backgroundRoot);
+
         this.stars = [];
 
-        let starMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true });
-        let starGeometry = new THREE.SphereGeometry(0.45, 4, 2);
+        let starMaterial = new THREE.MeshBasicMaterial({
+            color: 0x89a8ff,
+            transparent: true,
+            opacity: 0.84,
+            wireframe: true,
+            depthWrite: false,
+            depthTest: false
+        });
+        let starGeometry = new THREE.OctahedronGeometry(0.24, 0);
         let starPrototype = new THREE.Mesh(starGeometry, starMaterial);
 
         for (let i = 0; i < number; i++) {
-            let position = randomVector();
-            while (position.length() < 0.5 && position.length() > 1)
-                position = randomVector();
+            let star = starPrototype.clone();
+            let normalizedAnchor = new THREE.Vector2();
+            do {
+                normalizedAnchor.set(
+                    Math.random() * 1.8 - 0.9,
+                    Math.random() * 1.6 - 0.8,
+                );
+            } while (
+                (Math.abs(normalizedAnchor.x) < 0.24 && normalizedAnchor.y > 0.18) ||
+                (Math.abs(normalizedAnchor.x) < 0.18 && Math.abs(normalizedAnchor.y) < 0.22) ||
+                (Math.abs(normalizedAnchor.x) < 0.28 && normalizedAnchor.y < -0.38)
+            );
 
-            position.normalize();
-            position.multiplyScalar(distance + Math.random() * offset);
+            let baseScale = 0.32 + Math.random() * 0.46;
+            star.scale.setScalar(baseScale);
+            star.frustumCulled = false;
+            star.renderOrder = -10;
 
-            if (Math.random() < 0.035) {
-                let points = Array(Math.ceil(Math.random() * 6) + 8)
-                    .fill(0)
-                    .map(() => randomVector().multiplyScalar(Math.random() * 5));
+            this.stars.push({
+                baseScale,
+                depth: -8 + Math.random() * 16,
+                driftAmplitude: new THREE.Vector2(
+                    0.04 + Math.random() * 0.08,
+                    0.03 + Math.random() * 0.07,
+                ),
+                driftPhase: Math.random() * Math.PI * 2,
+                driftSpeed: 0.00018 + Math.random() * 0.00024,
+                mesh: star,
+                normalizedAnchor,
+                origin: new THREE.Vector3(),
+                rotationRate: new THREE.Vector3(
+                    0.00005 + Math.random() * 0.00008,
+                    0.00008 + Math.random() * 0.00012,
+                    0.00003 + Math.random() * 0.00006,
+                ),
+            });
+            this.backgroundRoot.add(star);
+        }
 
-                let geometry = new ConvexGeometry(points);
-                let direction = randomVector().multiplyScalar(0.012);
-                let rotationRate = randomVector().multiplyScalar(0.0006);
-                let satellite = new Satellite(geometry, starMaterial, direction, rotationRate);
-                satellite.position.copy(position);
-                this.satellites.push(satellite);
-                this.add(satellite);
-            } else {
-                let star = starPrototype.clone();
-                let scale = 0.7 + Math.random() * 0.8;
-                star.position.copy(position);
-                star.scale.setScalar(scale);
-                this.stars.push(star);
-                this.add(star);
-            }
+        this.syncBackgroundLayout();
+    }
+
+    syncBackgroundLayout(layout: MenuLayout = this.getLayout()) {
+        let halfSize = this.getVisibleHalfSize(layout);
+        let usableWidth = Math.max(halfSize.x - 0.55, 4.8);
+        let usableHeight = Math.max(halfSize.y - 0.8, 4.1);
+
+        for (let star of this.stars) {
+            star.origin.set(
+                star.normalizedAnchor.x * usableWidth * 1.08,
+                star.normalizedAnchor.y * usableHeight * 1.08,
+                star.depth,
+            );
+            star.mesh.position.copy(star.origin);
         }
     }
 
@@ -501,7 +570,11 @@ export default class MenuScene extends THREE.Scene {
         this.pointer.y = -(clientY / this.height) * 2 + 1;
 
         this.raycaster.setFromCamera(this.pointer, this.camera);
-        let pickTargets = this.selectableVehicles.map(vehicle => vehicle.group);
+        let pickTargets: Array<THREE.Object3D> = [];
+        if (this.leftArrowGroup)
+            pickTargets.push(this.leftArrowGroup);
+        if (this.rightArrowGroup)
+            pickTargets.push(this.rightArrowGroup);
         if (this.confirmButtonGroup)
             pickTargets.push(this.confirmButtonGroup);
 
@@ -511,19 +584,23 @@ export default class MenuScene extends THREE.Scene {
             return;
 
         let intersected = intersects[0].object;
-        if (intersected.userData.action === "confirm" || intersected.parent?.userData.action === "confirm") {
+        let action = intersected.userData.action || intersected.parent?.userData.action;
+
+        if (action === "confirm") {
             this.startGame(this.selectableVehicles[this.selectedIndex].menuVehicle.playableIndex);
             return;
         }
 
-        let group: THREE.Object3D | null = intersected;
-        while (group && typeof group.userData.menuVehicleIndex !== "number")
-            group = group.parent;
-
-        if (!group || typeof group.userData.menuVehicleIndex !== "number")
+        if (action === "prev") {
+            this.leftArrowPressedUntil = performance.now() + 180;
+            this.selectVehicle((this.selectedIndex - 1 + this.selectableVehicles.length) % this.selectableVehicles.length);
             return;
+        }
 
-        this.selectVehicle(group.userData.menuVehicleIndex);
+        if (action === "next") {
+            this.rightArrowPressedUntil = performance.now() + 180;
+            this.selectVehicle((this.selectedIndex + 1) % this.selectableVehicles.length);
+        }
     }
 
     handleKeydown(event: KeyboardEvent) {
@@ -531,10 +608,12 @@ export default class MenuScene extends THREE.Scene {
             return;
 
         if (event.key === "ArrowLeft" || event.key.toLowerCase() === "a") {
+            this.leftArrowPressedUntil = performance.now() + 180;
             this.selectVehicle((this.selectedIndex - 1 + this.selectableVehicles.length) % this.selectableVehicles.length);
         }
 
         if (event.key === "ArrowRight" || event.key.toLowerCase() === "d") {
+            this.rightArrowPressedUntil = performance.now() + 180;
             this.selectVehicle((this.selectedIndex + 1) % this.selectableVehicles.length);
         }
 
@@ -546,43 +625,29 @@ export default class MenuScene extends THREE.Scene {
     async loadVehicleGroup(vehicle: MenuVehicle, index: number, loader: GLTFLoader): Promise<SelectableVehicle> {
         let data = await loader.loadAsync(vehicle.data.modelPath);
         let group = data.scene;
-        group.userData.menuVehicleIndex = index;
 
         let box = new THREE.Box3().setFromObject(group);
         let size = box.getSize(new THREE.Vector3());
         let center = box.getCenter(new THREE.Vector3());
         let maxDimension = Math.max(size.x, size.y, size.z) || 1;
         let scale = 2.55 / maxDimension;
+        let baseScale = scale * vehicle.menuScaleMultiplier;
 
         group.position.sub(center.multiplyScalar(scale));
-        group.scale.setScalar(scale);
-        group.userData.baseScale = scale;
+        group.scale.setScalar(baseScale);
         group.rotation.y = -Math.PI / 6;
 
-        let pedestal = this.createPedestal(vehicle.accentColor);
-        pedestal.userData.menuVehicleIndex = index;
-        group.add(pedestal);
-
-        let hitArea = this.createHitArea(index);
-        group.add(hitArea);
-
         let labelSprite = this.createVehicleLabel(vehicle);
-        labelSprite.position.set(0, -2.8, 0);
+        labelSprite.position.set(0, -3.5, 0.2);
         group.add(labelSprite);
-
-        let checkMark = this.createCheckMark(vehicle.accentColor);
-        checkMark.position.set(0, -2.05, 0.3);
-        group.add(checkMark);
+        group.visible = false;
 
         return {
-            baseY: 0,
-            checkMark,
+            baseScale,
             group,
-            hitArea,
             index,
             labelSprite,
-            menuVehicle: vehicle,
-            pedestal
+            menuVehicle: vehicle
         };
     }
 
@@ -599,14 +664,17 @@ export default class MenuScene extends THREE.Scene {
         this.camera.zoom = this.getContentZoom(this.getLayout());
         this.camera.lookAt(0, 0.6, 0);
         this.camera.updateProjectionMatrix();
+        this.add(this.camera);
 
         this.renderer = new THREE.WebGLRenderer({
             canvas: document.getElementById("menu") as HTMLCanvasElement,
             alpha: true,
             antialias: true
         });
+        this.renderer.setClearColor(0x000000, 0);
         this.renderer.setPixelRatio(window.devicePixelRatio);
         this.renderer.setSize(this.width, this.height);
+        this.renderer.domElement.style.background = "transparent";
 
         this.composer = new EffectComposer(this.renderer);
         this.composer.addPass(new RenderPass(this, this.camera));
@@ -629,8 +697,13 @@ export default class MenuScene extends THREE.Scene {
         rimLight.position.set(10, 7, 4);
         this.add(rimLight);
 
+        let starLight = new THREE.DirectionalLight(0xcbd8ff, 0.18);
+        starLight.position.set(0, 12, -16);
+        this.add(starLight);
+
         this.setupBackgroundEntities();
         this.createTitleGroup();
+        this.createArrowControls();
         this.createConfirmButton();
 
         let loader = new GLTFLoader();
@@ -656,11 +729,8 @@ export default class MenuScene extends THREE.Scene {
 
         for (let i = 0; i < this.selectableVehicles.length; i++) {
             let vehicle = this.selectableVehicles[i];
-            let baseScale = vehicle.group.userData.baseScale || 1;
-            let scale = i === index ? baseScale * 1.12 : baseScale;
-            vehicle.group.scale.setScalar(scale);
-            vehicle.checkMark.visible = i === index;
-            vehicle.labelSprite.position.y = i === index ? -2.55 : -2.8;
+            vehicle.group.visible = i === index;
+            vehicle.group.scale.setScalar(vehicle.baseScale);
         }
     }
 
@@ -675,43 +745,17 @@ export default class MenuScene extends THREE.Scene {
 
     updateLayout() {
         let layout = this.getLayout();
-        let useTwoRows = this.shouldUseTwoRows();
 
         this.camera.zoom = this.getContentZoom(layout);
         this.camera.updateProjectionMatrix();
 
-        if (useTwoRows) {
-            let topRowCount = 3;
-            let bottomRowCount = this.selectableVehicles.length - topRowCount;
-            let topStart = -layout.vehicleSpacing * (topRowCount - 1) / 2;
-            let bottomStart = -layout.vehicleSpacing * (bottomRowCount - 1) / 2;
-
-            for (let i = 0; i < this.selectableVehicles.length; i++) {
-                let selectableVehicle = this.selectableVehicles[i];
-                if (i < topRowCount) {
-                    selectableVehicle.baseY = -0.2;
-                    selectableVehicle.group.position.set(topStart + i * layout.vehicleSpacing, selectableVehicle.baseY, 0);
-                } else {
-                    selectableVehicle.baseY = -4.1;
-                    selectableVehicle.group.position.set(
-                        bottomStart + (i - topRowCount) * layout.vehicleSpacing,
-                        selectableVehicle.baseY,
-                        0,
-                    );
-                }
-            }
-        } else {
-            let start = -layout.vehicleSpacing * (this.selectableVehicles.length - 1) / 2;
-
-            for (let i = 0; i < this.selectableVehicles.length; i++) {
-                let selectableVehicle = this.selectableVehicles[i];
-                selectableVehicle.baseY = 0;
-                selectableVehicle.group.position.set(start + i * layout.vehicleSpacing, selectableVehicle.baseY, 0);
-            }
+        for (let selectableVehicle of this.selectableVehicles) {
+            selectableVehicle.group.position.set(0, layout.vehicleY, 0);
+            selectableVehicle.labelSprite.position.set(0, layout.labelY, 0.2);
         }
 
         if (this.titleGroup) {
-            this.titleGroup.position.set(layout.titleX, layout.titleY, 0);
+            this.titleGroup.position.set(0, layout.titleY, 0);
             this.titleSprite.scale.copy(this.titleBaseScale);
             this.titleSprite.scale.multiplyScalar(layout.titleScale / this.titleBaseScale.y);
             this.titleShadowSprite.scale.copy(this.titleSprite.scale);
@@ -719,28 +763,59 @@ export default class MenuScene extends THREE.Scene {
             this.subtitleSprite.scale.multiplyScalar(
                 layout.titleScale * 0.36 / this.subtitleBaseScale.y,
             );
-            this.subtitleSprite.position.y = this.width < 640 ? -1.75 : -2.1;
+            this.subtitleSprite.position.y = layout.subtitleY;
+        }
+
+        if (this.leftArrowGroup && this.rightArrowGroup) {
+            this.leftArrowGroup.position.set(-layout.arrowOffsetX, layout.vehicleY - 0.18, 0);
+            this.rightArrowGroup.position.set(layout.arrowOffsetX, layout.vehicleY - 0.18, 0);
+
+            this.leftArrowSprite.scale.copy(this.leftArrowBaseScale);
+            this.leftArrowSprite.scale.multiplyScalar(layout.arrowScale);
+            this.leftArrowShadowSprite.scale.copy(this.leftArrowSprite.scale);
+
+            this.rightArrowSprite.scale.copy(this.rightArrowBaseScale);
+            this.rightArrowSprite.scale.multiplyScalar(layout.arrowScale);
+            this.rightArrowShadowSprite.scale.copy(this.rightArrowSprite.scale);
         }
 
         if (this.confirmButtonGroup) {
-            this.confirmButtonGroup.position.set(0, useTwoRows ? -8.2 : -6.55, 0);
-            let buttonScale = this.width < 640 ? 0.82 : this.width < 980 ? 0.92 : 1;
+            this.confirmButtonGroup.position.set(0, layout.confirmY, 0);
             this.confirmButtonSprite.scale.copy(this.confirmButtonBaseScale);
-            this.confirmButtonSprite.scale.multiplyScalar(buttonScale);
+            this.confirmButtonSprite.scale.multiplyScalar(layout.confirmButtonScale);
             this.confirmButtonShadowSprite.scale.copy(this.confirmButtonSprite.scale);
         }
+
+        this.syncBackgroundLayout(layout);
     }
 
     update(dt: number) {
         let layout = this.getLayout();
+        let now = performance.now();
 
         if (this.titleGroup) {
-            let pulse = 1 + Math.sin(performance.now() * 0.0026) * layout.titlePulseAmplitude;
+            let pulse = 1 + Math.sin(now * 0.0026) * layout.titlePulseAmplitude;
             this.titleGroup.scale.setScalar(pulse);
         }
 
+        if (this.leftArrowGroup) {
+            let pressed = now < this.leftArrowPressedUntil;
+            let scale = pressed ? 1.16 : 1;
+            this.leftArrowGroup.scale.x += (scale - this.leftArrowGroup.scale.x) * 0.24;
+            this.leftArrowGroup.scale.y += (scale - this.leftArrowGroup.scale.y) * 0.24;
+            this.leftArrowGroup.scale.z = 1;
+        }
+
+        if (this.rightArrowGroup) {
+            let pressed = now < this.rightArrowPressedUntil;
+            let scale = pressed ? 1.16 : 1;
+            this.rightArrowGroup.scale.x += (scale - this.rightArrowGroup.scale.x) * 0.24;
+            this.rightArrowGroup.scale.y += (scale - this.rightArrowGroup.scale.y) * 0.24;
+            this.rightArrowGroup.scale.z = 1;
+        }
+
         if (this.confirmButtonGroup) {
-            let confirmPulse = 1 + Math.sin(performance.now() * 0.0034) * 0.06;
+            let confirmPulse = 1 + Math.sin(now * 0.0034) * 0.06;
             this.confirmButtonGroup.scale.setScalar(confirmPulse);
         }
 
@@ -748,16 +823,25 @@ export default class MenuScene extends THREE.Scene {
             let selectableVehicle = this.selectableVehicles[i];
             selectableVehicle.group.rotateY(0.00035 * dt);
 
-            let targetY = selectableVehicle.baseY + (i === this.selectedIndex ? 0.34 : 0);
-            selectableVehicle.group.position.y += (targetY - selectableVehicle.group.position.y) * 0.08;
+            let targetScale = i === this.selectedIndex ?
+                selectableVehicle.baseScale * layout.vehicleBaseScale :
+                selectableVehicle.baseScale;
+            let currentScale = selectableVehicle.group.scale.x;
+            let nextScale = currentScale + (targetScale - currentScale) * 0.08;
+            selectableVehicle.group.scale.setScalar(nextScale);
         }
 
-        for (let satellite of this.satellites)
-            satellite.update(dt);
-
         for (let star of this.stars) {
-            star.rotation.x += 0.0001 * dt;
-            star.rotation.y += 0.00014 * dt;
+            star.mesh.position.x = star.origin.x +
+                Math.sin(now * star.driftSpeed + star.driftPhase) * star.driftAmplitude.x;
+            star.mesh.position.y = star.origin.y +
+                Math.cos(now * star.driftSpeed * 0.8 + star.driftPhase * 1.1) * star.driftAmplitude.y;
+            star.mesh.position.z = star.origin.z;
+            star.mesh.rotation.x += star.rotationRate.x * dt;
+            star.mesh.rotation.y += star.rotationRate.y * dt;
+            star.mesh.rotation.z += star.rotationRate.z * dt;
+            let twinkle = 0.92 + Math.sin(now * star.driftSpeed * 1.8 + star.driftPhase) * 0.18;
+            star.mesh.scale.setScalar(star.baseScale * twinkle);
         }
     }
 }

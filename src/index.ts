@@ -8,13 +8,13 @@ let currentTime = 0;
 
 // loops updates
 function animate(timestamp?: number) {
-    let dt = timestamp - currentTime;
-    currentTime = timestamp;
+    let safeTimestamp = timestamp ?? currentTime;
+    let dt = safeTimestamp - currentTime;
+    currentTime = safeTimestamp;
 
     scene.camera.updateProjectionMatrix();
-    scene.composer.render();
-
     scene.update(dt);
+    scene.renderer.render(scene, scene.camera);
 
     requestAnimationFrame(animate);
 }
