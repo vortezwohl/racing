@@ -3,7 +3,7 @@ import { Checkpoint, VehicleData } from "../utils/interfaces";
 import Vehicle from "./Vehicle";
 import Track from "./Track";
 
-export default class CPU extends Vehicle {
+export default class NPC extends Vehicle {
     pathPointIndex: number;
     
     constructor(scene: THREE.Scene, vehicleData: VehicleData, 
@@ -41,7 +41,7 @@ export default class CPU extends Vehicle {
         this.pathPointIndex = this.nextPointIndex(track);
         this.direction = track.pathVectors[this.pathPointIndex].clone();
 
-        // set velocity directly for greater control of the CPU's movement
+        // set velocity directly for greater control of the NPC's movement
         this.velocity = this.direction.clone()
             .multiplyScalar(this.getEffectiveAcceleration() * this.thrust * dt * 50);
         this.velocity.add(this.gravity.clone().multiplyScalar(dt * 0.75));

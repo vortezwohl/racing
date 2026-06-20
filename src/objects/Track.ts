@@ -68,7 +68,7 @@ export default class Track {
         }
     }
 
-    // store direction vectors for each point for CPU player
+    // store direction vectors for each point for NPC movement
     createPathVectors(points: Array<THREE.Vector3>, divisions: number,
         debug?: boolean, scene?: THREE.Scene) {
 

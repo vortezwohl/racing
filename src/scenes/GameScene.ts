@@ -5,7 +5,7 @@ import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass";
 import { ConvexGeometry } from "three/examples/jsm/geometries/ConvexGeometry"
-import { CPU, Player, Track, Vehicle } from "../objects/objects";
+import { NPC, Player, Track, Vehicle } from "../objects/objects";
 import { Satellite } from "../decorations/decorations";
 import { randomVector } from "../utils/geometry";
 import { Controls, GameSceneOptions, RaceUi } from "../utils/interfaces";
@@ -110,8 +110,8 @@ export default class GameScene extends THREE.Scene {
     satellites: Array<Satellite>;
     
     player: Player;
-    CPUs: Array<Vehicle>;
-    cpuMenuVehicles: Array<MenuVehicle>;
+    npcs: Array<Vehicle>;
+    npcMenuVehicles: Array<MenuVehicle>;
     raceVehicleStates: Array<RaceVehicleState>;
 
     countdown: number;
@@ -142,7 +142,7 @@ export default class GameScene extends THREE.Scene {
         this.floatingClusters = [];
         this.nebulaGlows = [];
         this.raceVehicleStates = [];
-        this.cpuMenuVehicles = [];
+        this.npcMenuVehicles = [];
         this.handleKeyDownBound = (e: KeyboardEvent) => {
             this.keysPressed[e.key.toLowerCase()] = true;
         };
@@ -702,21 +702,21 @@ export default class GameScene extends THREE.Scene {
             this.track.startRotation.clone(), firstCheckpoint, debug, this.orbitals);
         this.player.handleCameraMovement(true, true);
 
-        this.CPUs = [];
-        this.cpuMenuVehicles = [];
+        this.npcs = [];
+        this.npcMenuVehicles = [];
         let offset = 4;
 
         for (let i = 0; i < 3; i++) {
-            if (i == speederIndex || this.CPUs.length == 3)
+            if (i == speederIndex || this.npcs.length == 3)
                 continue;
 
             let startPoint = new THREE.Vector3(this.track.startPoint.x, 
                 this.track.startPoint.y, this.track.startPoint.z + offset);
 
-            this.CPUs.push(new CPU(this, speeders[i], startPoint,
+            this.npcs.push(new NPC(this, speeders[i], startPoint,
                 this.track.startDirection.clone(), 
                 this.track.startRotation.clone(), firstCheckpoint, debug));
-            this.cpuMenuVehicles.push(menuVehicles[i]);
+            this.npcMenuVehicles.push(menuVehicles[i]);
 
             offset *= -1;
         }
@@ -910,42 +910,7 @@ export default class GameScene extends THREE.Scene {
     }
 
     getMarkerOpacity(position: THREE.Vector3): number {
-        if (this.countdown < 6000)
-            return raceTrail.maxMarkerOpacity;
-
-        let distance = this.camera.position.distanceTo(position);
-        let distanceOpacity = distance >= raceTrail.fadeStartDistance ?
-            raceTrail.maxMarkerOpacity :
-            distance <= raceTrail.fadeEndDistance ?
-                raceTrail.minMarkerOpacity :
-                THREE.MathUtils.lerp(
-                    raceTrail.minMarkerOpacity,
-                    raceTrail.maxMarkerOpacity,
-                    THREE.MathUtils.smootherstep(
-                        distance,
-                        raceTrail.fadeEndDistance,
-                        raceTrail.fadeStartDistance,
-                    ),
-                );
-
-        let projected = position.clone().project(this.camera);
-        let screenX = (projected.x * 0.5 + 0.5) * this.width;
-        let screenY = (-projected.y * 0.5 + 0.5) * this.height;
-        let centerX = this.width * 0.5;
-        let centerY = this.height * 0.68;
-        let centerDistance = Math.hypot(screenX - centerX, screenY - centerY);
-        let centerOpacity = centerDistance >= raceTrail.centerFadeRadiusPx ?
-            1 :
-            THREE.MathUtils.lerp(
-                raceTrail.minMarkerOpacity,
-                1,
-                THREE.MathUtils.smootherstep(
-                    centerDistance,
-                    0,
-                    raceTrail.centerFadeRadiusPx,
-                ),
-            );
-        return Math.min(distanceOpacity, centerOpacity);
+        return raceTrail.maxMarkerOpacity;
     }
 
     setupRaceVehicleStates(speederIndex: number) {
@@ -968,20 +933,20 @@ export default class GameScene extends THREE.Scene {
             },
         ];
 
-        for (let i = 0; i < this.CPUs.length; i++) {
-            let menuVehicle = this.cpuMenuVehicles[i] || menuVehicles[i] ||
+        for (let i = 0; i < this.npcs.length; i++) {
+            let menuVehicle = this.npcMenuVehicles[i] || menuVehicles[i] ||
                 menuVehicles[0];
             let identityColor = raceIdentityColors[(i + 1) % raceIdentityColors.length];
             states.push({
                 displayName: menuVehicle.label,
                 effectiveTrailPositions: [],
                 ...this.createFluidTrailState(identityColor),
-                id: `cpu-${i + 1}`,
+                id: `npc-${i + 1}`,
                 identityColor,
                 isLocalPlayer: false,
                 markerElements: this.createRaceMarker(menuVehicle.label, identityColor),
                 trailPositions: [],
-                vehicle: this.CPUs[i],
+                vehicle: this.npcs[i],
             });
         }
 
@@ -1032,9 +997,15 @@ export default class GameScene extends THREE.Scene {
         this.camera.updateMatrixWorld();
         let markerBounds = this.ui.markerHost.getBoundingClientRect();
         let projected = markerPosition.clone().project(this.camera);
-        let isInFrontOfCamera = projected.z <= 1;
+        let cameraForward = this.camera.getWorldDirection(new THREE.Vector3());
+        let toMarker = markerPosition.clone().sub(this.camera.position);
+        let isInFrontOfCamera = toMarker.dot(cameraForward) >= 0;
         let screenX = (projected.x * 0.5 + 0.5) * markerBounds.width;
         let screenY = (-projected.y * 0.5 + 0.5) * markerBounds.height;
+        if (!isInFrontOfCamera) {
+            screenX = markerBounds.width - screenX;
+            screenY = markerBounds.height - screenY;
+        }
         let edgePadding = 18;
         let clampedX = THREE.MathUtils.clamp(
             screenX,
@@ -1048,9 +1019,7 @@ export default class GameScene extends THREE.Scene {
         );
         state.markerElements.root.style.transform =
             `translate(${clampedX}px, ${clampedY}px) translate(-50%, -100%)`;
-        state.markerElements.root.style.display = isInFrontOfCamera ?
-            "flex" :
-            "none";
+        state.markerElements.root.style.display = "flex";
     }
 
     updateRaceVehicleState(state: RaceVehicleState) {
@@ -1439,8 +1408,8 @@ export default class GameScene extends THREE.Scene {
             });
             
             let rank = 1;
-            for (let cpu of this.CPUs)
-            if (cpu.laps > 2)
+            for (let npc of this.npcs)
+            if (npc.laps > 2)
             rank++;
             
             this.ui.dashboard.style.display = "none";
@@ -1550,8 +1519,8 @@ export default class GameScene extends THREE.Scene {
         // update vehicles
         this.player.update(this.track, dt, this.keysPressed);
 
-        for (let cpu of this.CPUs)
-            cpu.update(this.track, dt);
+        for (let npc of this.npcs)
+            npc.update(this.track, dt);
 
         this.updateRaceVehicleStates();
         this.updateDraftBoosts(dt);
@@ -1613,8 +1582,8 @@ export default class GameScene extends THREE.Scene {
 
         this.player?.clearPendingTimeouts();
         this.player?.disposeAudio?.();
-        for (let cpu of this.CPUs || [])
-            cpu.clearPendingTimeouts();
+        for (let npc of this.npcs || [])
+            npc.clearPendingTimeouts();
         Object.values(this.sounds || {}).forEach((sound) => {
             sound.pause();
             sound.currentTime = 0;
