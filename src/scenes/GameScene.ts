@@ -293,14 +293,14 @@ export default class GameScene extends THREE.Scene {
                     4 + Math.random() * 8,
                 ),
                 driftPhase: Math.random() * Math.PI * 2,
-                driftSpeed: 0.00005 + Math.random() * 0.00007,
+                driftSpeed: 0.00014 + Math.random() * 0.00018,
                 mesh: cluster,
                 origin: clusterSpec.position.clone(),
                 pieces: cluster.userData.pieces,
                 rotationRate: new THREE.Vector3(
-                    (Math.random() - 0.5) * 0.00004,
+                    (Math.random() - 0.5) * 0.00008,
+                    (Math.random() - 0.5) * 0.00012,
                     (Math.random() - 0.5) * 0.00006,
-                    (Math.random() - 0.5) * 0.00003,
                 ),
             });
             this.add(cluster);
@@ -535,15 +535,15 @@ export default class GameScene extends THREE.Scene {
                     8 + Math.random() * 18,
                 ),
                 driftPhase: Math.random() * Math.PI * 4,
-                driftSpeed: 0.00016 + Math.random() * 0.00046,
+                driftSpeed: 0.00042 + Math.random() * 0.00084,
                 mesh: piece,
                 origin: piece.position.clone(),
                 pulseAmplitude: 0.04 + Math.random() * 0.06,
                 pulseSpeed: 0.00034 + Math.random() * 0.00048,
                 rotationRate: new THREE.Vector3(
-                    (Math.random() - 0.5) * 0.00066,
-                    (Math.random() - 0.5) * 0.00088,
-                    (Math.random() - 0.5) * 0.00056,
+                    (Math.random() - 0.5) * 0.0011,
+                    (Math.random() - 0.5) * 0.0015,
+                    (Math.random() - 0.5) * 0.0009,
                 ),
             });
         }
