@@ -46,11 +46,9 @@ export default class MenuScene extends THREE.Scene {
     subtitleBaseScale: THREE.Vector3;
     leftArrowGroup: THREE.Group;
     leftArrowSprite: THREE.Sprite;
-    leftArrowShadowSprite: THREE.Sprite;
     leftArrowBaseScale: THREE.Vector3;
     rightArrowGroup: THREE.Group;
     rightArrowSprite: THREE.Sprite;
-    rightArrowShadowSprite: THREE.Sprite;
     rightArrowBaseScale: THREE.Vector3;
     confirmButtonGroup: THREE.Group;
     confirmButtonSprite: THREE.Sprite;
@@ -59,12 +57,16 @@ export default class MenuScene extends THREE.Scene {
 
     width: number;
     height: number;
+    curtain: HTMLElement | null;
 
     raycaster: THREE.Raycaster;
     pointer: THREE.Vector2;
     selectedIndex: number;
     leftArrowPressedUntil: number;
     rightArrowPressedUntil: number;
+    confirmPressedUntil: number;
+    transitionStart: number;
+    transitionPlayableIndex: number;
 
     sounds: { [key: string]: HTMLAudioElement };
 
@@ -73,6 +75,7 @@ export default class MenuScene extends THREE.Scene {
 
         this.width = window.innerWidth;
         this.height = window.innerHeight;
+        this.curtain = document.getElementById("curtain");
         this.selectedIndex = 0;
         this.pointer = new THREE.Vector2();
         this.raycaster = new THREE.Raycaster();
@@ -81,6 +84,9 @@ export default class MenuScene extends THREE.Scene {
         this.stars = [];
         this.leftArrowPressedUntil = 0;
         this.rightArrowPressedUntil = 0;
+        this.confirmPressedUntil = 0;
+        this.transitionStart = 0;
+        this.transitionPlayableIndex = 0;
 
         this.render();
 
@@ -236,6 +242,47 @@ export default class MenuScene extends THREE.Scene {
         return sprite;
     }
 
+    createTextButtonSprite(
+        text: string,
+        depthColor: string,
+        fillColor: string,
+        glowColor: string,
+        scale: number,
+        fontSize: number,
+    ): THREE.Sprite {
+        let canvas = document.createElement("canvas");
+        let context = canvas.getContext("2d");
+        if (!context)
+            throw new Error("Unable to create button text context.");
+
+        canvas.width = 1200;
+        canvas.height = 320;
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        this.drawNeonText(
+            context,
+            text,
+            canvas.width / 2,
+            canvas.height / 2,
+            fontSize,
+            "900",
+            depthColor,
+            fillColor,
+            glowColor,
+            "#e7feff",
+        );
+
+        let texture = new THREE.CanvasTexture(canvas);
+        texture.needsUpdate = true;
+        let material = new THREE.SpriteMaterial({
+            map: texture,
+            transparent: true,
+            depthWrite: false
+        });
+        let sprite = new THREE.Sprite(material);
+        sprite.scale.set(scale * canvas.width / canvas.height, scale, 1);
+        return sprite;
+    }
+
     createTextSprite(
         text: string,
         fillStyle: string,
@@ -349,36 +396,45 @@ export default class MenuScene extends THREE.Scene {
     createArrowSprite(
         direction: "left" | "right",
         fillStyle: string,
-        shadowStyle: string,
     ): THREE.Sprite {
         let canvas = document.createElement("canvas");
         let context = canvas.getContext("2d");
         if (!context)
             throw new Error("Unable to create arrow canvas.");
 
-        canvas.width = 360;
-        canvas.height = 360;
+        canvas.width = 420;
+        canvas.height = 420;
         context.clearRect(0, 0, canvas.width, canvas.height);
 
         let horizontalInset = 102;
         let tipOffset = direction === "left" ? -1 : 1;
+        let centerX = canvas.width / 2;
+        let centerY = canvas.height / 2;
 
-        context.fillStyle = shadowStyle;
-        context.beginPath();
-        context.moveTo(180 + tipOffset * 108, 180);
-        context.lineTo(180 - tipOffset * horizontalInset, 82);
-        context.lineTo(180 - tipOffset * 58, 180);
-        context.lineTo(180 - tipOffset * horizontalInset, 278);
-        context.closePath();
+        let drawArrowPath = (tipDistance: number, sideDistance: number, notchDistance: number) => {
+            context.beginPath();
+            context.moveTo(centerX + tipOffset * tipDistance, centerY);
+            context.lineTo(centerX - tipOffset * sideDistance, centerY - 98);
+            context.lineTo(centerX - tipOffset * notchDistance, centerY);
+            context.lineTo(centerX - tipOffset * sideDistance, centerY + 98);
+            context.closePath();
+        };
+
+        context.save();
+        context.globalCompositeOperation = "lighter";
+        context.filter = "blur(26px)";
+        context.fillStyle = "rgba(77, 214, 255, 0.46)";
+        drawArrowPath(124, horizontalInset + 24, 38);
         context.fill();
 
+        context.filter = "blur(12px)";
+        context.fillStyle = "rgba(112, 232, 255, 0.42)";
+        drawArrowPath(118, horizontalInset + 14, 48);
+        context.fill();
+        context.restore();
+
         context.fillStyle = fillStyle;
-        context.beginPath();
-        context.moveTo(180 + tipOffset * 88, 180);
-        context.lineTo(180 - tipOffset * (horizontalInset - 18), 102);
-        context.lineTo(180 - tipOffset * 42, 180);
-        context.lineTo(180 - tipOffset * (horizontalInset - 18), 258);
-        context.closePath();
+        drawArrowPath(108, horizontalInset, 58);
         context.fill();
 
         let texture = new THREE.CanvasTexture(canvas);
@@ -390,6 +446,74 @@ export default class MenuScene extends THREE.Scene {
         let sprite = new THREE.Sprite(material);
         sprite.scale.set(2.85, 2.85, 1);
         return sprite;
+    }
+
+    clamp01(value: number): number {
+        return Math.min(Math.max(value, 0), 1);
+    }
+
+    easeInCubic(value: number): number {
+        return value * value * value;
+    }
+
+    easeOutCubic(value: number): number {
+        return 1 - Math.pow(1 - value, 3);
+    }
+
+    easeInOutCubic(value: number): number {
+        return value < 0.5 ?
+            4 * value * value * value :
+            1 - Math.pow(-2 * value + 2, 3) / 2;
+    }
+
+    setCurtainOpacity(opacity: number) {
+        if (!this.curtain)
+            return;
+
+        this.curtain.style.opacity = `${this.clamp01(opacity)}`;
+    }
+
+    setSpriteOpacity(sprite: THREE.Sprite | undefined, opacity: number) {
+        if (!sprite)
+            return;
+
+        let material = sprite.material as THREE.SpriteMaterial;
+        material.opacity = this.clamp01(opacity);
+    }
+
+    applyMenuOverlayOpacity(opacity: number) {
+        let safeOpacity = this.clamp01(opacity);
+        this.setSpriteOpacity(this.titleSprite, safeOpacity);
+        this.setSpriteOpacity(this.titleShadowSprite, safeOpacity * 0.82);
+        this.setSpriteOpacity(this.subtitleSprite, safeOpacity);
+        this.setSpriteOpacity(this.leftArrowSprite, safeOpacity);
+        this.setSpriteOpacity(this.rightArrowSprite, safeOpacity);
+        this.setSpriteOpacity(this.confirmButtonSprite, safeOpacity);
+        this.setSpriteOpacity(this.confirmButtonShadowSprite, safeOpacity * 0.82);
+
+        let selectedVehicle = this.selectableVehicles[this.selectedIndex];
+        if (selectedVehicle)
+            this.setSpriteOpacity(selectedVehicle.labelSprite, safeOpacity);
+    }
+
+    updateTransitionCamera(layout: MenuLayout, progress: number) {
+        let cameraProgress = this.easeInOutCubic(this.clamp01(progress));
+        let baseZoom = this.getContentZoom(layout);
+        let targetZoom = baseZoom * 1.95;
+        this.camera.zoom = THREE.MathUtils.lerp(baseZoom, targetZoom, cameraProgress);
+
+        this.camera.position.set(
+            THREE.MathUtils.lerp(0, 2.8, cameraProgress),
+            THREE.MathUtils.lerp(10, 8.35, cameraProgress),
+            THREE.MathUtils.lerp(28, 17.5, cameraProgress),
+        );
+
+        this.camera.lookAt(
+            THREE.MathUtils.lerp(0, 0.7, cameraProgress),
+            THREE.MathUtils.lerp(0.6, layout.vehicleY + 0.18, cameraProgress),
+            THREE.MathUtils.lerp(0, 0.2, cameraProgress),
+        );
+        this.camera.updateProjectionMatrix();
     }
 
     createTitleGroup() {
@@ -434,67 +558,51 @@ export default class MenuScene extends THREE.Scene {
 
     createArrowControls() {
         this.leftArrowGroup = new THREE.Group();
-        this.leftArrowShadowSprite = this.createArrowSprite(
-            "left",
-            "#4b2b0f",
-            "#241206",
-        );
-        this.leftArrowShadowSprite.position.set(-0.08, -0.08, -0.1);
-        this.leftArrowGroup.add(this.leftArrowShadowSprite);
-
         this.leftArrowSprite = this.createArrowSprite(
             "left",
-            "#f2be68",
-            "#7f4b1f",
+            "#7ad9ff",
         );
         this.leftArrowGroup.add(this.leftArrowSprite);
         this.leftArrowBaseScale = this.leftArrowSprite.scale.clone();
 
         this.leftArrowGroup.userData.action = "prev";
         this.leftArrowSprite.userData.action = "prev";
-        this.leftArrowShadowSprite.userData.action = "prev";
         this.add(this.leftArrowGroup);
 
         this.rightArrowGroup = new THREE.Group();
-        this.rightArrowShadowSprite = this.createArrowSprite(
-            "right",
-            "#4b2b0f",
-            "#241206",
-        );
-        this.rightArrowShadowSprite.position.set(0.08, -0.08, -0.1);
-        this.rightArrowGroup.add(this.rightArrowShadowSprite);
-
         this.rightArrowSprite = this.createArrowSprite(
             "right",
-            "#f2be68",
-            "#7f4b1f",
+            "#7ad9ff",
         );
         this.rightArrowGroup.add(this.rightArrowSprite);
         this.rightArrowBaseScale = this.rightArrowSprite.scale.clone();
 
         this.rightArrowGroup.userData.action = "next";
         this.rightArrowSprite.userData.action = "next";
-        this.rightArrowShadowSprite.userData.action = "next";
         this.add(this.rightArrowGroup);
     }
 
     createConfirmButton() {
         this.confirmButtonGroup = new THREE.Group();
 
-        this.confirmButtonShadowSprite = this.createButtonSprite(
-            "Play",
+        this.confirmButtonShadowSprite = this.createTextSprite(
+            "PLAY",
             "#0a2f5f",
             "#061327",
-            "#143b8a",
+            104,
+            4.2,
+            "900",
         );
         this.confirmButtonShadowSprite.position.set(0.12, -0.12, -0.1);
         this.confirmButtonGroup.add(this.confirmButtonShadowSprite);
 
-        this.confirmButtonSprite = this.createButtonSprite(
-            "Play",
+        this.confirmButtonSprite = this.createTextSprite(
+            "PLAY",
             "#4de8ff",
             "#0f4ca3",
-            "#c8feff",
+            104,
+            4.2,
+            "900",
         );
         this.confirmButtonGroup.add(this.confirmButtonSprite);
         this.confirmButtonBaseScale = this.confirmButtonSprite.scale.clone();
@@ -640,7 +748,7 @@ export default class MenuScene extends THREE.Scene {
     }
 
     handlePointerDown(clientX: number, clientY: number) {
-        if (!this.selectableVehicles.length)
+        if (!this.selectableVehicles.length || this.transitionStart)
             return;
 
         this.pointer.x = clientX / this.width * 2 - 1;
@@ -664,6 +772,7 @@ export default class MenuScene extends THREE.Scene {
         let action = intersected.userData.action || intersected.parent?.userData.action;
 
         if (action === "confirm") {
+            this.confirmPressedUntil = performance.now() + 140;
             this.startGame(this.selectableVehicles[this.selectedIndex].menuVehicle.playableIndex);
             return;
         }
@@ -681,7 +790,7 @@ export default class MenuScene extends THREE.Scene {
     }
 
     handleKeydown(event: KeyboardEvent) {
-        if (!this.selectableVehicles.length)
+        if (!this.selectableVehicles.length || this.transitionStart)
             return;
 
         if (event.key === "ArrowLeft" || event.key.toLowerCase() === "a") {
@@ -695,6 +804,7 @@ export default class MenuScene extends THREE.Scene {
         }
 
         if (event.key === "Enter" || event.key === " ") {
+            this.confirmPressedUntil = performance.now() + 140;
             this.startGame(this.selectableVehicles[this.selectedIndex].menuVehicle.playableIndex);
         }
     }
@@ -812,12 +922,12 @@ export default class MenuScene extends THREE.Scene {
     }
 
     startGame(playableIndex: number) {
-        let curtain = document.getElementById("curtain");
-        curtain.classList.add("fade-to-black");
+        if (this.transitionStart)
+            return;
 
-        setTimeout(() => {
-            window.location.href = `game.html?speeder=${playableIndex}`;
-        }, 800);
+        this.transitionStart = performance.now();
+        this.transitionPlayableIndex = playableIndex;
+        this.setCurtainOpacity(0);
     }
 
     updateLayout() {
@@ -849,11 +959,9 @@ export default class MenuScene extends THREE.Scene {
 
             this.leftArrowSprite.scale.copy(this.leftArrowBaseScale);
             this.leftArrowSprite.scale.multiplyScalar(layout.arrowScale);
-            this.leftArrowShadowSprite.scale.copy(this.leftArrowSprite.scale);
 
             this.rightArrowSprite.scale.copy(this.rightArrowBaseScale);
             this.rightArrowSprite.scale.multiplyScalar(layout.arrowScale);
-            this.rightArrowShadowSprite.scale.copy(this.rightArrowSprite.scale);
         }
 
         if (this.confirmButtonGroup) {
@@ -869,15 +977,46 @@ export default class MenuScene extends THREE.Scene {
     update(dt: number) {
         let layout = this.getLayout();
         let now = performance.now();
+        let transitionElapsed = this.transitionStart ? now - this.transitionStart : 0;
+        let transitionActive = this.transitionStart > 0;
+
+        if (transitionActive) {
+            let fadeProgress = this.easeOutCubic(
+                this.clamp01((transitionElapsed - 70) / 260),
+            );
+            let cameraProgress = this.clamp01((transitionElapsed - 120) / 760);
+            let blackoutProgress = this.easeInCubic(
+                this.clamp01((transitionElapsed - 900) / 220),
+            );
+
+            this.applyMenuOverlayOpacity(1 - fadeProgress);
+            this.updateTransitionCamera(layout, cameraProgress);
+            this.setCurtainOpacity(blackoutProgress);
+
+            if (this.titleGroup) {
+                this.titleGroup.scale.setScalar(1);
+                this.titleGroup.position.y = layout.titleY + fadeProgress * 0.18;
+            }
+
+            if (blackoutProgress >= 1) {
+                window.location.href = `game.html?speeder=${this.transitionPlayableIndex}`;
+                return;
+            }
+        } else {
+            this.applyMenuOverlayOpacity(1);
+            this.setCurtainOpacity(0);
+        }
 
         if (this.titleGroup) {
-            let pulse = 1 + Math.sin(now * 0.0026) * layout.titlePulseAmplitude;
-            this.titleGroup.scale.setScalar(pulse);
+            if (!transitionActive) {
+                let pulse = 1 + Math.sin(now * 0.0026) * layout.titlePulseAmplitude;
+                this.titleGroup.scale.setScalar(pulse);
+            }
         }
 
         if (this.leftArrowGroup) {
             let pressed = now < this.leftArrowPressedUntil;
-            let scale = pressed ? 1.16 : 1;
+            let scale = pressed ? 1.22 : 1;
             this.leftArrowGroup.scale.x += (scale - this.leftArrowGroup.scale.x) * 0.24;
             this.leftArrowGroup.scale.y += (scale - this.leftArrowGroup.scale.y) * 0.24;
             this.leftArrowGroup.scale.z = 1;
@@ -885,15 +1024,27 @@ export default class MenuScene extends THREE.Scene {
 
         if (this.rightArrowGroup) {
             let pressed = now < this.rightArrowPressedUntil;
-            let scale = pressed ? 1.16 : 1;
+            let scale = pressed ? 1.22 : 1;
             this.rightArrowGroup.scale.x += (scale - this.rightArrowGroup.scale.x) * 0.24;
             this.rightArrowGroup.scale.y += (scale - this.rightArrowGroup.scale.y) * 0.24;
             this.rightArrowGroup.scale.z = 1;
         }
 
         if (this.confirmButtonGroup) {
-            let confirmPulse = 1 + Math.sin(now * 0.0034) * 0.06;
-            this.confirmButtonGroup.scale.setScalar(confirmPulse);
+            if (transitionActive) {
+                let transitionScale = THREE.MathUtils.lerp(
+                    this.confirmButtonGroup.scale.x,
+                    0.92,
+                    0.18,
+                );
+                this.confirmButtonGroup.scale.setScalar(transitionScale);
+            } else if (now < this.confirmPressedUntil) {
+                let pressScale = 1.18 + Math.sin(now * 0.025) * 0.025;
+                this.confirmButtonGroup.scale.setScalar(pressScale);
+            } else {
+                let confirmPulse = 1 + Math.sin(now * 0.0034) * 0.03;
+                this.confirmButtonGroup.scale.setScalar(confirmPulse);
+            }
         }
 
         for (let i = 0; i < this.selectableVehicles.length; i++) {
@@ -903,6 +1054,12 @@ export default class MenuScene extends THREE.Scene {
             let targetScale = i === this.selectedIndex ?
                 selectableVehicle.baseScale * layout.vehicleBaseScale :
                 selectableVehicle.baseScale;
+            if (transitionActive && i === this.selectedIndex) {
+                let zoomFocus = this.easeOutCubic(
+                    this.clamp01((transitionElapsed - 150) / 700),
+                );
+                targetScale *= 1 + zoomFocus * 0.48;
+            }
             let currentScale = selectableVehicle.group.scale.x;
             let nextScale = currentScale + (targetScale - currentScale) * 0.08;
             selectableVehicle.group.scale.setScalar(nextScale);
