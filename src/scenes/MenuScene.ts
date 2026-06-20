@@ -12,6 +12,7 @@ type SelectableVehicle = {
     baseScale: number;
     group: THREE.Group;
     index: number;
+    labelBaseScale: THREE.Vector3;
     labelSprite: THREE.Sprite;
     menuVehicle: MenuVehicle;
 };
@@ -76,6 +77,7 @@ export default class MenuScene extends THREE.Scene {
     transitionPlayableIndex: number;
 
     sounds: { [key: string]: HTMLAudioElement };
+    textFontFamily: string;
 
     constructor(options: MenuSceneOptions) {
         super();
@@ -109,6 +111,7 @@ export default class MenuScene extends THREE.Scene {
         this.confirmPressedUntil = 0;
         this.transitionStart = 0;
         this.transitionPlayableIndex = 0;
+        this.textFontFamily = '"RaceName", "Trebuchet MS", "Verdana", sans-serif';
 
         this.render();
 
@@ -357,13 +360,12 @@ export default class MenuScene extends THREE.Scene {
         glowColor: string,
         highlightColor: string,
     ) {
-        let fontFamily = '"Orbitron", "Rajdhani", "Trebuchet MS", "Verdana", sans-serif';
         context.save();
         context.textAlign = "center";
         context.textBaseline = "middle";
         context.lineJoin = "round";
         context.lineCap = "round";
-        context.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+        context.font = `${fontWeight} ${fontSize}px ${this.textFontFamily}`;
 
         let depthSteps = 7;
         for (let i = depthSteps; i > 0; i--) {
@@ -835,6 +837,7 @@ export default class MenuScene extends THREE.Scene {
         group.rotation.y = -Math.PI / 6;
 
         let labelSprite = this.createVehicleLabel(vehicle);
+        let labelBaseScale = labelSprite.scale.clone();
         labelSprite.position.set(0, -3.5, 0.2);
         group.add(labelSprite);
         group.visible = false;
@@ -843,6 +846,7 @@ export default class MenuScene extends THREE.Scene {
             baseScale,
             group,
             index,
+            labelBaseScale,
             labelSprite,
             menuVehicle: vehicle
         };
@@ -1075,6 +1079,9 @@ export default class MenuScene extends THREE.Scene {
             let currentScale = selectableVehicle.group.scale.x;
             let nextScale = currentScale + (targetScale - currentScale) * 0.08;
             selectableVehicle.group.scale.setScalar(nextScale);
+            let labelScale = selectableVehicle.labelBaseScale.clone()
+                .multiplyScalar(1 / Math.max(nextScale, 0.0001));
+            selectableVehicle.labelSprite.scale.copy(labelScale);
         }
 
         for (let star of this.stars) {

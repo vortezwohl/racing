@@ -3,6 +3,7 @@ import Track from "./Track";
 import { GLTF, GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
 import { DynamicDebugVector } from "../utils/debug";
 import { Checkpoint, VehicleData } from "../utils/interfaces";
+import { racePerformance } from "../utils/raceConfig";
 
 export default class Vehicle {
     acceleration: number;
@@ -18,6 +19,9 @@ export default class Vehicle {
     gravity: THREE.Vector3;
     velocity: THREE.Vector3;
     thrust: number;
+    collisionSlowUntil: number;
+    draftCharge: number;
+    maxSpeed: number;
 
     width: number;
     height: number;
@@ -44,13 +48,12 @@ export default class Vehicle {
         position: THREE.Vector3, direction: THREE.Vector3,
         rotation: THREE.Euler, checkpoint: Checkpoint, debug?: boolean) {
 
-        this.acceleration = vehicleData.acceleration;
-        this.deceleration = vehicleData.deceleration;
-        this.friction = vehicleData.friction;
-        this.turnRate = vehicleData.turnRate;
-        this.maxRoll = vehicleData.maxRoll;
-        this.defaultGravity = vehicleData.defaultGravity || 
-            new THREE.Vector3(0, -0.012, 0);
+        this.acceleration = racePerformance.acceleration;
+        this.deceleration = racePerformance.deceleration;
+        this.friction = racePerformance.friction;
+        this.turnRate = racePerformance.turnRate;
+        this.maxRoll = racePerformance.maxRoll;
+        this.defaultGravity = racePerformance.defaultGravity.clone();
 
         this.position = position;
         this.direction = direction;
@@ -58,6 +61,9 @@ export default class Vehicle {
         this.gravity = this.defaultGravity;
         this.velocity = new THREE.Vector3(0, 0, 0);
         this.thrust = 1;
+        this.collisionSlowUntil = 0;
+        this.draftCharge = 0;
+        this.maxSpeed = racePerformance.maxSpeed;
 
         this.width = vehicleData.width;
         this.height = vehicleData.height;
@@ -113,6 +119,7 @@ export default class Vehicle {
         let geometry = new THREE.BoxGeometry(this.width, this.height, this.length);
         let material = new THREE.MeshBasicMaterial({
             color: 0x00ff00,
+            depthWrite: false,
             wireframe: true,
             transparent: !debug,
             opacity: 0
@@ -253,21 +260,58 @@ export default class Vehicle {
         this.direction.applyAxisAngle(this.hitbox.up, angle);
     }
 
+    getDraftAccelerationScale(): number {
+        return 1 + this.draftCharge * racePerformance.draftAccelerationBonus;
+    }
+
+    getDraftMaxSpeedScale(): number {
+        return 1 + this.draftCharge * racePerformance.draftMaxSpeedBonus;
+    }
+
+    getCollisionSlowScale(now: number = performance.now()): number {
+        return now < this.collisionSlowUntil ? racePerformance.collisionSlowScale : 1;
+    }
+
+    getEffectiveAcceleration(now: number = performance.now()): number {
+        return this.acceleration * this.getDraftAccelerationScale() *
+            this.getCollisionSlowScale(now);
+    }
+
+    getEffectiveMaxSpeed(): number {
+        return this.maxSpeed * this.getDraftMaxSpeedScale();
+    }
+
+    applySpeedLimit() {
+        let maxSpeed = this.getEffectiveMaxSpeed();
+        if (this.velocity.length() > maxSpeed)
+            this.velocity.setLength(maxSpeed);
+    }
+
+    applyCollisionSlow(durationMs: number) {
+        this.collisionSlowUntil = Math.max(
+            this.collisionSlowUntil,
+            performance.now() + durationMs,
+        );
+    }
+
+    syncTransform() {
+        this.model.position.set(this.position.x, this.position.y, this.position.z);
+        this.hitbox.position.set(this.position.x, this.position.y, this.position.z);
+        this.model.setRotationFromEuler(this.rotation.clone());
+        this.hitbox.setRotationFromEuler(this.rotation.clone());
+    }
+
     handleVehicleMovement() {
         // friction
         this.velocity.multiplyScalar(this.friction);
 
         // gravity
         this.velocity.add(this.gravity);
+        this.applySpeedLimit();
 
         // position
         this.position.add(this.velocity);
-        this.model.position.set(this.position.x, this.position.y, this.position.z);
-        this.hitbox.position.set(this.position.x, this.position.y, this.position.z);
-
-        // rotation
-        this.model.setRotationFromEuler(this.rotation.clone());
-        this.hitbox.setRotationFromEuler(this.rotation.clone());
+        this.syncTransform();
 
         if (this.directionDebug)
             this.directionDebug.update(this.direction.clone(), this.position.clone());
@@ -331,10 +375,9 @@ export default class Vehicle {
         
         this.velocity = new THREE.Vector3(0, 0, 0);
         this.thrust = 1;
-        this.model.position.set(this.position.x, this.position.y, this.position.z);
-        this.hitbox.position.set(this.position.x, this.position.y, this.position.z);
-        this.model.setRotationFromEuler(this.rotation.clone());
-        this.hitbox.setRotationFromEuler(this.rotation.clone());
+        this.collisionSlowUntil = 0;
+        this.draftCharge = 0;
+        this.syncTransform();
     }
 
     update(track: Track,  dt?: number) {

@@ -5,7 +5,6 @@ import Track from "./Track";
 
 export default class CPU extends Vehicle {
     pathPointIndex: number;
-    maxThrust: number;
     
     constructor(scene: THREE.Scene, vehicleData: VehicleData, 
         position: THREE.Vector3, direction: THREE.Vector3,
@@ -13,9 +12,6 @@ export default class CPU extends Vehicle {
 
         super(scene, vehicleData, position, direction, 
             rotation, checkpoint, debug);
-
-        // clamp maxthrust between 0.3 and 0.8
-        this.maxThrust = Math.random() * 0.5 + 0.3;
     }
     
     nextPointIndex(track: Track): number {
@@ -39,8 +35,7 @@ export default class CPU extends Vehicle {
         if (!this.model || !this.hitbox || !track || !dt)
             return;
 
-        // clamp thrust
-        this.thrust = Math.min(this.thrust + 0.02, this.maxThrust);
+        this.thrust = Math.min(this.thrust + 0.02, 1);
 
         // update direciton manually instead of using controls
         this.pathPointIndex = this.nextPointIndex(track);
@@ -48,7 +43,7 @@ export default class CPU extends Vehicle {
 
         // set velocity directly for greater control of the CPU's movement
         this.velocity = this.direction.clone()
-            .multiplyScalar(this.acceleration * this.thrust * dt * 50);
+            .multiplyScalar(this.getEffectiveAcceleration() * this.thrust * dt * 50);
         this.velocity.add(this.gravity.clone().multiplyScalar(dt * 0.75));
 
         // update collisions and position

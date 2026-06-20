@@ -2,6 +2,7 @@ import * as THREE from "three";
 import Track from "./Track";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
 import { Controls, Checkpoint, VehicleData } from "../utils/interfaces";
+import { raceCamera } from "../utils/raceConfig";
 import Vehicle from "./Vehicle";
 
 export default class Player extends Vehicle {
@@ -67,6 +68,28 @@ export default class Player extends Vehicle {
 
         this.camera.lookAt(targetPosition);
     }
+
+    updateCameraFov() {
+        let speedRatio = THREE.MathUtils.clamp(
+            this.velocity.length() / this.getEffectiveMaxSpeed(),
+            0,
+            1,
+        );
+        let targetFov = THREE.MathUtils.lerp(
+            raceCamera.lowSpeedFov,
+            raceCamera.highSpeedFov,
+            speedRatio,
+        );
+        targetFov += this.draftCharge * raceCamera.draftFovBonus;
+        targetFov = Math.min(targetFov, raceCamera.maxFov);
+
+        this.camera.fov = THREE.MathUtils.lerp(
+            this.camera.fov,
+            targetFov,
+            raceCamera.smoothing,
+        );
+        this.camera.updateProjectionMatrix();
+    }
     
     handleTrackCollision(track: Track) {
         super.handleTrackCollision(track, true);
@@ -76,7 +99,7 @@ export default class Player extends Vehicle {
         // acceleration
         if (keysPressed["w"])
             this.velocity.add(this.direction.clone()
-                .multiplyScalar(this.acceleration * this.thrust * dt));
+                .multiplyScalar(this.getEffectiveAcceleration() * this.thrust * dt));
 
         // deceleration
         if (keysPressed["s"] || keysPressed["shift"])
@@ -114,6 +137,7 @@ export default class Player extends Vehicle {
         this.handleInput(keysPressed, dt);        
         super.update(track, dt);
         this.handleCameraMovement(!keysPressed["r"], this.isAlive);
+        this.updateCameraFov();
     }
 
     disposeAudio() {

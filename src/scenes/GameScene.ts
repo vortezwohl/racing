@@ -9,8 +9,20 @@ import { CPU, Player, Track, Vehicle } from "../objects/objects";
 import { Satellite } from "../decorations/decorations";
 import { randomVector } from "../utils/geometry";
 import { Controls, GameSceneOptions, RaceUi } from "../utils/interfaces";
+import {
+    raceCollision,
+    raceIdentityColors,
+    racePerformance,
+    raceTrail,
+} from "../utils/raceConfig";
 import { tracks } from "../../data/tracks/tracks";
-import { speeders, bike, mustang } from "../../data/vehicles/vehicles";
+import {
+    speeders,
+    bike,
+    mustang,
+    menuVehicles,
+    MenuVehicle,
+} from "../../data/vehicles/vehicles";
 
 type NebulaGlow = {
     baseScale: THREE.Vector2;
@@ -48,6 +60,17 @@ type RaceDebugState = {
     laps: number;
 };
 
+type RaceVehicleState = {
+    displayName: string;
+    id: string;
+    identityColor: number;
+    isLocalPlayer: boolean;
+    markerGroup?: THREE.Group;
+    trailLine: THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial>;
+    trailPositions: Array<THREE.Vector3>;
+    vehicle: Vehicle;
+};
+
 export default class GameScene extends THREE.Scene {
     active: boolean;
     canvas: HTMLCanvasElement;
@@ -73,6 +96,8 @@ export default class GameScene extends THREE.Scene {
     
     player: Player;
     CPUs: Array<Vehicle>;
+    cpuMenuVehicles: Array<MenuVehicle>;
+    raceVehicleStates: Array<RaceVehicleState>;
 
     countdown: number;
     fadeInTimeout?: number;
@@ -101,6 +126,8 @@ export default class GameScene extends THREE.Scene {
         this.height = window.innerHeight;
         this.floatingClusters = [];
         this.nebulaGlows = [];
+        this.raceVehicleStates = [];
+        this.cpuMenuVehicles = [];
         this.handleKeyDownBound = (e: KeyboardEvent) => {
             this.keysPressed[e.key.toLowerCase()] = true;
         };
@@ -661,6 +688,7 @@ export default class GameScene extends THREE.Scene {
         this.player.handleCameraMovement(true, true);
 
         this.CPUs = [];
+        this.cpuMenuVehicles = [];
         let offset = 4;
 
         for (let i = 0; i < 3; i++) {
@@ -673,9 +701,12 @@ export default class GameScene extends THREE.Scene {
             this.CPUs.push(new CPU(this, speeders[i], startPoint,
                 this.track.startDirection.clone(), 
                 this.track.startRotation.clone(), firstCheckpoint, debug));
+            this.cpuMenuVehicles.push(menuVehicles[i]);
 
             offset *= -1;
         }
+
+        this.setupRaceVehicleStates(speederIndex);
 
         if (debug) {
             // set up debugger
@@ -700,6 +731,297 @@ export default class GameScene extends THREE.Scene {
             filterGroup.add(this.filter, "threshold", 0.0, 1.0);
 
             this.debugger.close();
+        }
+    }
+
+    colorToCss(color: number): string {
+        let parsedColor = new THREE.Color(color);
+        let red = Math.round(parsedColor.r * 255);
+        let green = Math.round(parsedColor.g * 255);
+        let blue = Math.round(parsedColor.b * 255);
+        return `rgb(${red}, ${green}, ${blue})`;
+    }
+
+    createRaceNameSprite(text: string, color: number): THREE.Sprite {
+        let canvas = document.createElement("canvas");
+        let context = canvas.getContext("2d");
+        if (!context)
+            throw new Error("Unable to create race name canvas.");
+
+        canvas.width = 512;
+        canvas.height = 128;
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.textAlign = "center";
+        context.textBaseline = "middle";
+        context.font = '800 48px "RaceName", "Trebuchet MS", "Verdana", sans-serif';
+        context.shadowBlur = 16;
+        context.shadowColor = this.colorToCss(color);
+        context.lineWidth = 8;
+        context.strokeStyle = "rgba(0, 8, 22, 0.86)";
+        context.fillStyle = this.colorToCss(color);
+        context.strokeText(text, canvas.width / 2, canvas.height / 2);
+        context.fillText(text, canvas.width / 2, canvas.height / 2);
+
+        let texture = new THREE.CanvasTexture(canvas);
+        texture.needsUpdate = true;
+        let material = new THREE.SpriteMaterial({
+            map: texture,
+            transparent: true,
+            depthTest: false,
+            depthWrite: false,
+        });
+        let sprite = new THREE.Sprite(material);
+        sprite.scale.set(3.2, 0.8, 1);
+        sprite.renderOrder = 40;
+        return sprite;
+    }
+
+    createPointerSprite(color: number): THREE.Sprite {
+        let canvas = document.createElement("canvas");
+        let context = canvas.getContext("2d");
+        if (!context)
+            throw new Error("Unable to create race pointer canvas.");
+
+        canvas.width = 128;
+        canvas.height = 128;
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.beginPath();
+        context.moveTo(64, 108);
+        context.lineTo(20, 24);
+        context.lineTo(108, 24);
+        context.closePath();
+        context.shadowBlur = 16;
+        context.shadowColor = this.colorToCss(color);
+        context.fillStyle = this.colorToCss(color);
+        context.fill();
+
+        let texture = new THREE.CanvasTexture(canvas);
+        let material = new THREE.SpriteMaterial({
+            map: texture,
+            transparent: true,
+            depthTest: false,
+            depthWrite: false,
+        });
+        let sprite = new THREE.Sprite(material);
+        sprite.scale.set(0.55, 0.55, 1);
+        sprite.position.y = -0.58;
+        sprite.renderOrder = 41;
+        return sprite;
+    }
+
+    createIdentityMarker(displayName: string, color: number): THREE.Group {
+        let marker = new THREE.Group();
+        marker.add(this.createRaceNameSprite(displayName, color));
+        marker.add(this.createPointerSprite(color));
+        marker.renderOrder = 40;
+        this.add(marker);
+        return marker;
+    }
+
+    createTrailLine(color: number): THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial> {
+        let geometry = new THREE.BufferGeometry();
+        let positions = new Float32Array(raceTrail.sampleCount * 3);
+        geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+        geometry.setDrawRange(0, 0);
+
+        let material = new THREE.LineBasicMaterial({
+            blending: THREE.AdditiveBlending,
+            color,
+            depthWrite: false,
+            linewidth: 4,
+            opacity: 0.72,
+            transparent: true,
+        });
+        let trailLine = new THREE.Line(geometry, material);
+        trailLine.renderOrder = 20;
+        this.add(trailLine);
+        return trailLine;
+    }
+
+    setupRaceVehicleStates(speederIndex: number) {
+        let playerMenuVehicle = menuVehicles.find(vehicle =>
+            vehicle.playableIndex === speederIndex
+        ) || menuVehicles[0];
+        let states: Array<RaceVehicleState> = [
+            {
+                displayName: playerMenuVehicle.label,
+                id: "player",
+                identityColor: raceIdentityColors[0],
+                isLocalPlayer: true,
+                trailLine: this.createTrailLine(raceIdentityColors[0]),
+                trailPositions: [],
+                vehicle: this.player,
+            },
+        ];
+
+        for (let i = 0; i < this.CPUs.length; i++) {
+            let menuVehicle = this.cpuMenuVehicles[i] || menuVehicles[i] ||
+                menuVehicles[0];
+            let identityColor = raceIdentityColors[(i + 1) % raceIdentityColors.length];
+            states.push({
+                displayName: menuVehicle.label,
+                id: `cpu-${i + 1}`,
+                identityColor,
+                isLocalPlayer: false,
+                markerGroup: this.createIdentityMarker(menuVehicle.label, identityColor),
+                trailLine: this.createTrailLine(identityColor),
+                trailPositions: [],
+                vehicle: this.CPUs[i],
+            });
+        }
+
+        this.raceVehicleStates = states;
+    }
+
+    getVehicleTailPosition(vehicle: Vehicle): THREE.Vector3 {
+        return vehicle.position.clone().sub(
+            vehicle.direction.clone().normalize().multiplyScalar(vehicle.length * 0.5),
+        );
+    }
+
+    updateRaceVehicleState(state: RaceVehicleState) {
+        let vehicle = state.vehicle;
+        if (!vehicle?.hitbox)
+            return;
+
+        if (state.markerGroup) {
+            state.markerGroup.position.copy(vehicle.position);
+            state.markerGroup.position.y += vehicle.height * 0.5 + 1.35;
+            state.markerGroup.lookAt(this.camera.position);
+        }
+
+        state.trailPositions.unshift(this.getVehicleTailPosition(vehicle));
+        if (state.trailPositions.length > raceTrail.sampleCount)
+            state.trailPositions.pop();
+
+        let speedRatio = THREE.MathUtils.clamp(
+            vehicle.velocity.length() / vehicle.getEffectiveMaxSpeed(),
+            0,
+            1,
+        );
+        let visibleCount = Math.max(
+            2,
+            Math.ceil(THREE.MathUtils.lerp(
+                Math.max(2, raceTrail.sampleCount * 0.32),
+                raceTrail.sampleCount,
+                speedRatio,
+            )),
+        );
+        visibleCount = Math.min(visibleCount, state.trailPositions.length);
+
+        let positionAttribute = state.trailLine.geometry
+            .getAttribute("position") as THREE.BufferAttribute;
+        for (let i = 0; i < raceTrail.sampleCount; i++) {
+            let point = state.trailPositions[i] || state.trailPositions[0] ||
+                vehicle.position;
+            positionAttribute.setXYZ(i, point.x, point.y, point.z);
+        }
+        positionAttribute.needsUpdate = true;
+        state.trailLine.geometry.setDrawRange(0, visibleCount);
+        state.trailLine.visible = visibleCount > 1 && vehicle.velocity.length() > 0.03;
+    }
+
+    updateRaceVehicleStates() {
+        for (let state of this.raceVehicleStates)
+            this.updateRaceVehicleState(state);
+    }
+
+    distanceToTrail(point: THREE.Vector3, trailPositions: Array<THREE.Vector3>): number {
+        if (trailPositions.length < 2)
+            return Infinity;
+
+        let nearestDistance = Infinity;
+        let segment = new THREE.Line3();
+        let closestPoint = new THREE.Vector3();
+        for (let i = 0; i < trailPositions.length - 1; i++) {
+            segment.set(trailPositions[i], trailPositions[i + 1]);
+            segment.closestPointToPoint(point, true, closestPoint);
+            nearestDistance = Math.min(
+                nearestDistance,
+                closestPoint.distanceTo(point),
+            );
+        }
+        return nearestDistance;
+    }
+
+    updateDraftBoosts(dt: number) {
+        for (let state of this.raceVehicleStates) {
+            let insideTrail = false;
+            for (let otherState of this.raceVehicleStates) {
+                if (state.id === otherState.id)
+                    continue;
+
+                let distance = this.distanceToTrail(
+                    state.vehicle.position,
+                    otherState.trailPositions,
+                );
+                if (distance <= raceTrail.zoneRadius) {
+                    insideTrail = true;
+                    break;
+                }
+            }
+
+            let delta = insideTrail ?
+                racePerformance.draftChargeGainPerMs * dt :
+                -racePerformance.draftChargeDecayPerMs * dt;
+            state.vehicle.draftCharge = THREE.MathUtils.clamp(
+                state.vehicle.draftCharge + delta,
+                0,
+                1,
+            );
+        }
+    }
+
+    separateCollidingVehicles(first: Vehicle, second: Vehicle) {
+        let firstBox = new THREE.Box3().setFromObject(first.hitbox);
+        let secondBox = new THREE.Box3().setFromObject(second.hitbox);
+        if (!firstBox.intersectsBox(secondBox))
+            return;
+
+        let firstCenter = firstBox.getCenter(new THREE.Vector3());
+        let secondCenter = secondBox.getCenter(new THREE.Vector3());
+        let normal = firstCenter.clone().sub(secondCenter);
+        if (normal.lengthSq() < 0.0001)
+            normal.copy(first.direction).negate();
+        normal.normalize();
+
+        let overlapX = Math.min(firstBox.max.x, secondBox.max.x) -
+            Math.max(firstBox.min.x, secondBox.min.x);
+        let overlapY = Math.min(firstBox.max.y, secondBox.max.y) -
+            Math.max(firstBox.min.y, secondBox.min.y);
+        let overlapZ = Math.min(firstBox.max.z, secondBox.max.z) -
+            Math.max(firstBox.min.z, secondBox.min.z);
+        let separation = Math.max(
+            Math.min(overlapX, overlapY, overlapZ),
+            0.02,
+        ) + raceCollision.pushStrength;
+
+        let firstSpeed = first.velocity.length();
+        let secondSpeed = second.velocity.length();
+        let totalSpeed = firstSpeed + secondSpeed;
+        let firstShare = totalSpeed > 0 ? secondSpeed / totalSpeed : 0.5;
+        let secondShare = totalSpeed > 0 ? firstSpeed / totalSpeed : 0.5;
+
+        first.position.add(normal.clone().multiplyScalar(separation * firstShare));
+        second.position.add(normal.clone().multiplyScalar(-separation * secondShare));
+        first.velocity.multiplyScalar(firstSpeed >= secondSpeed ? 0.82 : 0.65);
+        second.velocity.multiplyScalar(secondSpeed >= firstSpeed ? 0.82 : 0.65);
+        first.applyCollisionSlow(raceCollision.slowDurationMs);
+        second.applyCollisionSlow(raceCollision.slowDurationMs);
+        first.syncTransform();
+        second.syncTransform();
+    }
+
+    handleVehicleCollisions() {
+        for (let i = 0; i < this.raceVehicleStates.length; i++) {
+            for (let j = i + 1; j < this.raceVehicleStates.length; j++) {
+                let first = this.raceVehicleStates[i].vehicle;
+                let second = this.raceVehicleStates[j].vehicle;
+                if (!first.hitbox || !second.hitbox)
+                    continue;
+
+                this.separateCollidingVehicles(first, second);
+            }
         }
     }
 
@@ -917,6 +1239,10 @@ export default class GameScene extends THREE.Scene {
 
         for (let cpu of this.CPUs)
             cpu.update(this.track, dt);
+
+        this.updateRaceVehicleStates();
+        this.updateDraftBoosts(dt);
+        this.handleVehicleCollisions();
     }
 
     activate() {
