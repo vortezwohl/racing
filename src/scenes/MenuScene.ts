@@ -559,6 +559,12 @@ export default class MenuScene extends THREE.Scene {
         this.camera.updateProjectionMatrix();
     }
 
+    resetMenuCamera() {
+        this.camera.position.set(0, 10, 28);
+        this.camera.lookAt(0, 0.6, 0);
+        this.camera.updateProjectionMatrix();
+    }
+
     createTitleGroup() {
         this.titleGroup = new THREE.Group();
 
@@ -900,10 +906,8 @@ export default class MenuScene extends THREE.Scene {
             0,
             500,
         );
-        this.camera.position.set(0, 10, 28);
         this.camera.zoom = this.getContentZoom(this.getLayout());
-        this.camera.lookAt(0, 0.6, 0);
-        this.camera.updateProjectionMatrix();
+        this.resetMenuCamera();
         this.add(this.camera);
 
         this.renderer = new THREE.WebGLRenderer({
@@ -1166,6 +1170,7 @@ export default class MenuScene extends THREE.Scene {
         this.confirmPressedUntil = 0;
         this.leftArrowPressedUntil = 0;
         this.rightArrowPressedUntil = 0;
+        this.resetMenuCamera();
         if (!preserveCurtain)
             this.setCurtainOpacity(0);
         this.selectVehicle(this.selectedIndex, false);
