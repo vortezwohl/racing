@@ -29,6 +29,13 @@ type MenuStar = {
     rotationRate: THREE.Vector3;
 };
 
+type NeonTextStyle = {
+    glowBlurScale?: number;
+    glowColor?: string;
+    highlightColor?: string;
+    highlightStrokeStyle?: string;
+};
+
 export default class MenuScene extends THREE.Scene {
     camera: THREE.OrthographicCamera;
     canvas: HTMLCanvasElement;
@@ -248,8 +255,10 @@ export default class MenuScene extends THREE.Scene {
             "900",
             shadowStyle,
             fillStyle,
-            glowStyle,
-            "#d5fbff",
+            {
+                glowColor: glowStyle,
+                highlightColor: "#d5fbff",
+            },
         );
 
         let texture = new THREE.CanvasTexture(canvas);
@@ -288,8 +297,10 @@ export default class MenuScene extends THREE.Scene {
             "900",
             depthColor,
             fillColor,
-            glowColor,
-            "#e7feff",
+            {
+                glowColor,
+                highlightColor: "#e7feff",
+            },
         );
 
         let texture = new THREE.CanvasTexture(canvas);
@@ -311,11 +322,20 @@ export default class MenuScene extends THREE.Scene {
         fontSize: number = 112,
         scale: number = 4.5,
         fontWeight: string = "900",
+        neonStyle?: NeonTextStyle,
     ): THREE.Sprite {
         let canvas = document.createElement("canvas");
         let context = canvas.getContext("2d");
         if (!context)
             throw new Error("Unable to create canvas text context.");
+
+        let resolvedNeonStyle: NeonTextStyle = {
+            glowBlurScale: 0.11,
+            glowColor: "rgba(70, 216, 255, 0.4)",
+            highlightColor: "#d8f9ff",
+            highlightStrokeStyle: "rgba(198, 244, 255, 0.46)",
+            ...neonStyle,
+        };
 
         canvas.width = 1400;
         canvas.height = 320;
@@ -329,8 +349,7 @@ export default class MenuScene extends THREE.Scene {
             fontWeight,
             shadowStyle || "#0f2d5e",
             fillStyle,
-            "#46d8ff",
-            "#efffff",
+            resolvedNeonStyle,
         );
 
         let texture = new THREE.CanvasTexture(canvas);
@@ -365,9 +384,13 @@ export default class MenuScene extends THREE.Scene {
         fontWeight: string,
         depthColor: string,
         fillColor: string,
-        glowColor: string,
-        highlightColor: string,
+        neonStyle?: NeonTextStyle,
     ) {
+        let glowColor = neonStyle?.glowColor || "#46d8ff";
+        let highlightColor = neonStyle?.highlightColor || "#efffff";
+        let highlightStrokeStyle = neonStyle?.highlightStrokeStyle || "rgba(223, 252, 255, 0.78)";
+        let glowBlurScale = neonStyle?.glowBlurScale || 0.18;
+
         context.save();
         context.textAlign = "center";
         context.textBaseline = "middle";
@@ -398,7 +421,7 @@ export default class MenuScene extends THREE.Scene {
         gradient.addColorStop(0.38, fillColor);
         gradient.addColorStop(1, "#1068ff");
 
-        context.shadowBlur = fontSize * 0.18;
+        context.shadowBlur = fontSize * glowBlurScale;
         context.shadowColor = glowColor;
         context.lineWidth = Math.max(3, Math.floor(fontSize * 0.07));
         context.strokeStyle = depthColor;
@@ -408,7 +431,7 @@ export default class MenuScene extends THREE.Scene {
 
         context.shadowBlur = 0;
         context.lineWidth = Math.max(2, Math.floor(fontSize * 0.03));
-        context.strokeStyle = "rgba(223, 252, 255, 0.78)";
+        context.strokeStyle = highlightStrokeStyle;
         context.strokeText(text, x, y);
         context.restore();
     }
@@ -552,7 +575,7 @@ export default class MenuScene extends THREE.Scene {
 
         this.titleSprite = this.createTextSprite(
             "SPACE RACER",
-            "#62ecff",
+            "#56dfff",
             "#0f4ca3",
             120,
             6.5,
@@ -618,7 +641,7 @@ export default class MenuScene extends THREE.Scene {
 
         this.confirmButtonSprite = this.createTextSprite(
             "PLAY",
-            "#4de8ff",
+            "#52dcff",
             "#0f4ca3",
             104,
             4.2,
