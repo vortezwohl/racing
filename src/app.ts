@@ -210,6 +210,15 @@ class AppShell {
         }, 620);
     }
 
+    syncActiveSceneViewport() {
+        window.requestAnimationFrame(() => {
+            if (this.currentScene instanceof GameScene)
+                this.currentScene.syncViewport();
+            else if (this.currentScene instanceof MenuScene)
+                this.currentScene.syncViewport();
+        });
+    }
+
     setActiveView(view: "menu" | "race") {
         let showMenu = view === "menu";
         this.menuView.classList.toggle("is-active", showMenu);
@@ -224,6 +233,8 @@ class AppShell {
                 this.resetCurtain();
             this.raceUi.backgroundHost.style.background = "";
         }
+
+        this.syncActiveSceneViewport();
     }
 
     start() {

@@ -159,6 +159,7 @@ export default class GameScene extends THREE.Scene {
     finishTimes: Map<string, number>;
     hud: RaceHud;
     hudState: RaceHudState;
+    hudActionTimeoutId?: number;
     isTouchDevice: boolean;
     lastCountdownText: string;
     lastPlayerLap: number;
@@ -204,21 +205,17 @@ export default class GameScene extends THREE.Scene {
         this.draftRelations = [];
         this.npcMenuVehicles = [];
         this.handleKeyDownBound = (e: KeyboardEvent) => {
+            if (this.finished)
+                return;
             this.keysPressed[e.key.toLowerCase()] = true;
         };
         this.handleKeyUpBound = (e: KeyboardEvent) => {
+            if (this.finished)
+                return;
             this.keysPressed[e.key.toLowerCase()] = false;
         };
         this.handleResizeBound = () => {
-            this.width = window.innerWidth;
-            this.height = window.innerHeight;
-
-            this.camera.aspect = this.width / this.height;
-            this.camera.updateProjectionMatrix();
-            this.renderer.setSize(this.width, this.height);
-            this.filter.setSize(this.width, this.height);
-            this.hud.resize(this.width, this.height);
-            this.renderHud();
+            this.syncViewport();
         };
         this.handlePointerDownBound = (e: PointerEvent) => {
             this.handlePointerDown(e);
@@ -826,6 +823,24 @@ export default class GameScene extends THREE.Scene {
         this.ui.joystick.style.display = this.isTouchDevice && !this.finished ? "block" : "none";
     }
 
+    clearPlayerInputs() {
+        this.keysPressed = {};
+        this.ui.knob.style.top = "5vw";
+        this.ui.knob.style.left = "5vw";
+    }
+
+    syncViewport() {
+        this.width = window.innerWidth;
+        this.height = window.innerHeight;
+
+        this.camera.aspect = this.width / this.height;
+        this.camera.updateProjectionMatrix();
+        this.renderer.setSize(this.width, this.height);
+        this.filter.setSize(this.width, this.height);
+        this.hud.resize(this.width, this.height);
+        this.renderHud();
+    }
+
     handlePointerDown(event: PointerEvent) {
         if (!this.active)
             return;
@@ -844,6 +859,7 @@ export default class GameScene extends THREE.Scene {
     }
 
     handleHudAction(action: RaceHudAction) {
+        this.hud.pressAction(action);
         switch (action) {
             case "toggle-settings":
                 this.hudState.gearPressedUntilMs = performance.now() + 140;
@@ -851,22 +867,39 @@ export default class GameScene extends THREE.Scene {
                 this.renderHud();
                 return;
             case "settings-resume":
-                this.hudState.showSettings = false;
-                this.renderHud();
+                this.runHudActionAfterFeedback(() => {
+                    this.hudState.showSettings = false;
+                    this.renderHud();
+                });
                 return;
             case "settings-exit":
             case "results-back":
-                this.hudState.showSettings = false;
-                this.onExitToMenu?.();
+                this.runHudActionAfterFeedback(() => {
+                    this.hudState.showSettings = false;
+                    this.onExitToMenu?.();
+                });
                 return;
             case "settings-restart":
             case "results-retry":
-                this.hudState.showSettings = false;
-                this.onRestartRace?.();
+                this.runHudActionAfterFeedback(() => {
+                    this.hudState.showSettings = false;
+                    this.onRestartRace?.();
+                });
                 return;
             default:
                 return;
         }
+    }
+
+    runHudActionAfterFeedback(callback: () => void, delayMs = 90) {
+        if (this.hudActionTimeoutId)
+            window.clearTimeout(this.hudActionTimeoutId);
+
+        this.renderHud();
+        this.hudActionTimeoutId = window.setTimeout(() => {
+            this.hudActionTimeoutId = undefined;
+            callback();
+        }, delayMs);
     }
 
     syncCountdownState() {
@@ -1882,6 +1915,7 @@ export default class GameScene extends THREE.Scene {
         this.debugState.finishPanelVisibleAt = performance.now();
         this.debugState.laps = this.player.laps;
         this.finished = true;
+        this.clearPlayerInputs();
         this.hudState.showResults = true;
         this.hudState.showSettings = false;
         document.body.dataset.raceFinished = "true";
@@ -1890,11 +1924,6 @@ export default class GameScene extends THREE.Scene {
         this.updateJoystickVisibility();
 
         this.player.sounds["complete-race"]?.play();
-        try {
-            this.player.engineSound.stop();
-        } catch (_error) {
-            // Avoid blocking the results panel if engine audio was already stopped.
-        }
     }
 
     // update game objects
@@ -1970,8 +1999,8 @@ export default class GameScene extends THREE.Scene {
         this.track.update(dt);
 
         let raceRunningMs = Math.max(0, this.countdown - 6000);
-        if (!this.finished)
-            this.player.update(this.track, dt, this.keysPressed);
+        let playerControls = this.finished ? {} : this.keysPressed;
+        this.player.update(this.track, dt, playerControls);
 
         for (let i = 0; i < this.npcs.length; i++) {
             let npc = this.npcs[i];
@@ -2024,6 +2053,10 @@ export default class GameScene extends THREE.Scene {
             return;
 
         this.active = false;
+        if (this.hudActionTimeoutId) {
+            window.clearTimeout(this.hudActionTimeoutId);
+            this.hudActionTimeoutId = undefined;
+        }
         this.keysPressed = {};
         this.ui.joystick.style.display = "none";
         window.removeEventListener("resize", this.handleResizeBound, false);

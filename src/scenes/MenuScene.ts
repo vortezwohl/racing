@@ -742,6 +742,10 @@ export default class MenuScene extends THREE.Scene {
     }
 
     handleResize() {
+        this.syncViewport();
+    }
+
+    syncViewport() {
         this.width = window.innerWidth;
         this.height = window.innerHeight;
 
@@ -754,7 +758,9 @@ export default class MenuScene extends THREE.Scene {
         this.camera.zoom = this.getContentZoom(layout);
         this.camera.updateProjectionMatrix();
 
+        this.renderer.setPixelRatio(window.devicePixelRatio);
         this.renderer.setSize(this.width, this.height);
+        this.composer.setSize(this.width, this.height);
         this.filter.setSize(this.width, this.height);
         this.updateLayout();
     }
@@ -1129,7 +1135,7 @@ export default class MenuScene extends THREE.Scene {
             this.setCurtainOpacity(0);
         this.selectVehicle(this.selectedIndex, false);
         this.applyMenuOverlayOpacity(1);
-        this.updateLayout();
+        this.syncViewport();
     }
 
     dispose() {
