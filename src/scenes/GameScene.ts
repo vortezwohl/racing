@@ -82,8 +82,16 @@ type DraftRelation = {
     sourceId: string;
 };
 
+type DraftState = {
+    active: boolean;
+    distanceToTrail?: number;
+    nearestTrailPoint?: THREE.Vector3;
+    sourceId?: string;
+};
+
 type RaceVehicleState = {
     displayName: string;
+    draftState?: DraftState;
     effectiveTrailPositions: Array<THREE.Vector3>;
     trailClusters: Array<TrailClusterSet>;
     id: string;
@@ -261,6 +269,7 @@ export default class GameScene extends THREE.Scene {
         this.playerLapStartTimeMs = 0;
         this.playerLapTimesMs = [];
         this.track.elapsedTime = 0;
+        this.clearAllTrailStates();
         this.updateJoystickVisibility();
         this.debugState.finishHandledAt = undefined;
         this.debugState.finishPanelVisibleAt = undefined;
@@ -1352,6 +1361,9 @@ export default class GameScene extends THREE.Scene {
         let states: Array<RaceVehicleState> = [
             {
                 displayName: playerMenuVehicle.label,
+                draftState: {
+                    active: false,
+                },
                 effectiveTrailPositions: [],
                 ...this.createFluidTrailState(raceIdentityColors[0]),
                 id: "player",
@@ -1370,6 +1382,9 @@ export default class GameScene extends THREE.Scene {
             let identityColor = raceIdentityColors[(i + 1) % raceIdentityColors.length];
             states.push({
                 displayName: menuVehicle.label,
+                draftState: {
+                    active: false,
+                },
                 effectiveTrailPositions: [],
                 ...this.createFluidTrailState(identityColor),
                 id: `npc-${i + 1}`,
@@ -1389,6 +1404,27 @@ export default class GameScene extends THREE.Scene {
         return vehicle.position.clone().sub(
             vehicle.direction.clone().normalize().multiplyScalar(vehicle.length * 0.5),
         );
+    }
+
+    getVehicleDraftProbePoint(vehicle: Vehicle): THREE.Vector3 {
+        return vehicle.position.clone().add(
+            vehicle.direction.clone().normalize().multiplyScalar(
+                vehicle.length * raceTrail.draftProbeForwardOffset,
+            ),
+        );
+    }
+
+    clearTrailState(state: RaceVehicleState) {
+        state.trailPositions = [];
+        state.effectiveTrailPositions = [];
+        state.draftState = {
+            active: false,
+        };
+    }
+
+    clearAllTrailStates() {
+        for (let state of this.raceVehicleStates || [])
+            this.clearTrailState(state);
     }
 
     buildEffectiveTrailPositions(
@@ -1485,7 +1521,18 @@ export default class GameScene extends THREE.Scene {
             );
         }
 
-        state.trailPositions.unshift(this.getVehicleTailPosition(vehicle));
+        let tailPosition = this.getVehicleTailPosition(vehicle);
+        if (!vehicle.isAlive) {
+            this.clearTrailState(state);
+        } else if (
+            state.trailPositions.length > 0 &&
+            state.trailPositions[0].distanceTo(tailPosition) >
+            raceTrail.draftTrailResetDistance
+        ) {
+            this.clearTrailState(state);
+        }
+
+        state.trailPositions.unshift(tailPosition);
         if (state.trailPositions.length > raceTrail.sampleCount)
             state.trailPositions.pop();
 
@@ -1672,30 +1719,113 @@ export default class GameScene extends THREE.Scene {
         return this.getTrailQuery(point, trailPositions).distance;
     }
 
+    getValidDraftQuery(
+        drafterPoint: THREE.Vector3,
+        sourceState: RaceVehicleState,
+    ): { distance: number; nearestPoint: THREE.Vector3 } | undefined {
+        let trailPositions = sourceState.effectiveTrailPositions;
+        if (trailPositions.length < 2)
+            return undefined;
+
+        let sourceVehicle = sourceState.vehicle;
+        let sourceDirection = sourceVehicle.direction.clone().normalize();
+        let toDrafter = drafterPoint.clone().sub(sourceVehicle.position);
+        if (toDrafter.dot(sourceDirection) > -raceTrail.draftBehindDistance)
+            return undefined;
+
+        let excludedDistance = raceTrail.draftHeadExclusionDistance;
+        let nearestDistance = Infinity;
+        let nearestPoint: THREE.Vector3 | undefined;
+        let segment = new THREE.Line3();
+        let closestPoint = new THREE.Vector3();
+
+        for (let i = 0; i < trailPositions.length - 1; i++) {
+            let rawStart = trailPositions[i];
+            let rawEnd = trailPositions[i + 1];
+            let segmentLength = rawStart.distanceTo(rawEnd);
+            if (segmentLength <= 0.0001)
+                continue;
+
+            let start = rawStart.clone();
+            let end = rawEnd.clone();
+            if (excludedDistance > 0) {
+                if (segmentLength <= excludedDistance) {
+                    excludedDistance -= segmentLength;
+                    continue;
+                }
+
+                let ratio = excludedDistance / segmentLength;
+                start.lerp(end, ratio);
+                excludedDistance = 0;
+            }
+
+            segment.set(start, end);
+            segment.closestPointToPoint(drafterPoint, true, closestPoint);
+            let pointBehindSource = closestPoint.clone().sub(sourceVehicle.position)
+                .dot(sourceDirection);
+            if (pointBehindSource > -raceTrail.draftBehindDistance)
+                continue;
+
+            let distance = closestPoint.distanceTo(drafterPoint);
+            if (distance < nearestDistance) {
+                nearestDistance = distance;
+                nearestPoint = closestPoint.clone();
+            }
+        }
+
+        if (!nearestPoint)
+            return undefined;
+
+        return {
+            distance: nearestDistance,
+            nearestPoint,
+        };
+    }
+
+    resolveDraftState(state: RaceVehicleState): DraftState {
+        let drafterPoint = this.getVehicleDraftProbePoint(state.vehicle);
+        let bestState: DraftState = {
+            active: false,
+        };
+
+        for (let otherState of this.raceVehicleStates) {
+            if (state.id === otherState.id)
+                continue;
+
+            let trailQuery = this.getValidDraftQuery(drafterPoint, otherState);
+            if (!trailQuery || trailQuery.distance > raceTrail.draftZoneRadius)
+                continue;
+
+            if (!bestState.active ||
+                trailQuery.distance < (bestState.distanceToTrail || Infinity)) {
+                bestState = {
+                    active: true,
+                    distanceToTrail: trailQuery.distance,
+                    nearestTrailPoint: trailQuery.nearestPoint.clone(),
+                    sourceId: otherState.id,
+                };
+            }
+        }
+
+        return bestState;
+    }
+
     updateDraftBoosts(dt: number): Array<DraftRelation> {
         let draftRelations: Array<DraftRelation> = [];
         for (let state of this.raceVehicleStates) {
-            let insideTrail = false;
-            for (let otherState of this.raceVehicleStates) {
-                if (state.id === otherState.id)
-                    continue;
-
-                let trailQuery = this.getTrailQuery(
-                    state.vehicle.position,
-                    otherState.effectiveTrailPositions,
-                );
-                if (trailQuery.distance <= raceTrail.draftZoneRadius) {
-                    insideTrail = true;
-                    draftRelations.push({
-                        distanceToTrail: trailQuery.distance,
-                        drafterId: state.id,
-                        nearestTrailPoint: trailQuery.nearestPoint.clone(),
-                        sourceId: otherState.id,
-                    });
-                }
+            let draftState = this.resolveDraftState(state);
+            state.draftState = draftState;
+            if (draftState.active) {
+                draftRelations.push({
+                    distanceToTrail: draftState.distanceToTrail || 0,
+                    drafterId: state.id,
+                    nearestTrailPoint: draftState.nearestTrailPoint?.clone() ||
+                        state.vehicle.position.clone(),
+                    sourceId: draftState.sourceId || "",
+                });
             }
 
-            let delta = insideTrail ?
+            let delta = draftState.active ?
                 racePerformance.draftChargeGainPerMs * dt :
                 -racePerformance.draftChargeDecayPerMs * dt;
             state.vehicle.draftCharge = THREE.MathUtils.clamp(
