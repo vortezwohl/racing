@@ -17,9 +17,12 @@ import RaceHud, {
 import {
     raceCollision,
     raceIdentityColors,
+    raceNpc,
     racePerformance,
     raceTrail,
 } from "../utils/raceConfig";
+import NpcPlannerClient from "../ai/npcRacing/plannerClient";
+import { buildRaceSnapshot } from "../ai/npcRacing/snapshot";
 import { tracks } from "../../data/tracks/tracks";
 import {
     menuVehicles,
@@ -125,9 +128,11 @@ const raceStartGrid = {
 
 export default class GameScene extends THREE.Scene {
     active: boolean;
+    audioEnabled: boolean;
     canvas: HTMLCanvasElement;
     debugMode: boolean;
     debugger: GUI;
+    disablePostProcessing: boolean;
 
     camera: THREE.PerspectiveCamera;
     renderer: THREE.WebGLRenderer;
@@ -149,6 +154,8 @@ export default class GameScene extends THREE.Scene {
     player: Player;
     npcs: Array<NPC>;
     npcMenuVehicles: Array<MenuVehicle>;
+    npcPlannerClient?: NpcPlannerClient;
+    npcSnapshotId: number;
     raceVehicleStates: Array<RaceVehicleState>;
     draftRelations: Array<DraftRelation>;
 
@@ -171,6 +178,7 @@ export default class GameScene extends THREE.Scene {
     isTouchDevice: boolean;
     lastCountdownText: string;
     lastPlayerLap: number;
+    observeMode: boolean;
     onExitToMenu?: () => void;
     onRestartRace?: () => void;
     playerAverageSpeedDistance: number;
@@ -186,8 +194,12 @@ export default class GameScene extends THREE.Scene {
         super();
 
         this.active = false;
+        this.audioEnabled = !options.disableAudio && !options.observeMode;
         this.canvas = options.canvas;
         this.debugMode = !!options.debug;
+        this.disablePostProcessing =
+            !!options.disablePostProcessing || !!options.safeMode || !!options.observeMode;
+        this.observeMode = !!options.observeMode;
         this.ui = options.ui;
         this.userData.raceUi = this.ui;
         this.userData.onVehicleLapAdvance = (vehicle: Vehicle, laps: number) => {
@@ -212,6 +224,8 @@ export default class GameScene extends THREE.Scene {
         this.raceVehicleStates = [];
         this.draftRelations = [];
         this.npcMenuVehicles = [];
+        this.npcPlannerClient = undefined;
+        this.npcSnapshotId = 0;
         this.handleKeyDownBound = (e: KeyboardEvent) => {
             if (this.finished)
                 return;
@@ -229,6 +243,7 @@ export default class GameScene extends THREE.Scene {
             this.handlePointerDown(e);
         };
 
+        Vehicle.engineAudioEnabled = this.audioEnabled;
         this.render(options.speederIndex, options.debug);
 
         // set up utilities
@@ -243,12 +258,15 @@ export default class GameScene extends THREE.Scene {
             laps: 1,
         };
 
-        this.sounds = {
-            "countdown": new Audio("./assets/sounds/countdown.wav"),
-            "countdown-start": new Audio("./assets/sounds/countdown-start.wav")
-        };
-        this.sounds["countdown"].volume = 0.2;
-        this.sounds["countdown-start"].volume = 0.24;
+        this.sounds = {};
+        if (this.audioEnabled) {
+            this.sounds = {
+                "countdown": new Audio("./assets/sounds/countdown.wav"),
+                "countdown-start": new Audio("./assets/sounds/countdown-start.wav")
+            };
+            this.sounds["countdown"].volume = 0.2;
+            this.sounds["countdown-start"].volume = 0.24;
+        }
 
         this.resetUi();
     }
@@ -847,7 +865,10 @@ export default class GameScene extends THREE.Scene {
         this.camera.aspect = this.width / this.height;
         this.camera.updateProjectionMatrix();
         this.renderer.setSize(this.width, this.height);
-        this.filter.setSize(this.width, this.height);
+        if (this.composer)
+            this.composer.setSize(this.width, this.height);
+        if (this.filter)
+            this.filter.setSize(this.width, this.height);
         this.hud.resize(this.width, this.height);
         this.renderHud();
     }
@@ -1117,10 +1138,17 @@ export default class GameScene extends THREE.Scene {
             this.orbitals = new OrbitControls(this.camera, this.renderer.domElement);
 
         // set up glowing postprocessing
-        this.composer = new EffectComposer(this.renderer);
-        this.composer.addPass(new RenderPass(this, this.camera));
-        this.filter = new UnrealBloomPass(new THREE.Vector2(this.width, this.height), 1.6, 0.1, 0.9);
-        this.composer.addPass(this.filter);
+        if (!this.disablePostProcessing) {
+            this.composer = new EffectComposer(this.renderer);
+            this.composer.addPass(new RenderPass(this, this.camera));
+            this.filter = new UnrealBloomPass(
+                new THREE.Vector2(this.width, this.height),
+                1.6,
+                0.1,
+                0.9,
+            );
+            this.composer.addPass(this.filter);
+        }
 
         // set objects in the scene
         let light = new THREE.AmbientLight(0xbdd6ff, 0.72);
@@ -1150,7 +1178,8 @@ export default class GameScene extends THREE.Scene {
 
         this.player = new Player(this, this.camera, playerMenuVehicle.data,
             startGridSlots[0].position.clone(), this.track.startDirection.clone(),
-            startGridSlots[0].rotation.clone(), firstCheckpoint, debug, this.orbitals);
+            startGridSlots[0].rotation.clone(), firstCheckpoint, debug, this.orbitals,
+            this.audioEnabled);
         this.player.handleCameraMovement(true, true);
 
         this.npcs = [];
@@ -1161,10 +1190,11 @@ export default class GameScene extends THREE.Scene {
             let npcMenuVehicle = this.npcMenuVehicles[i];
             this.npcs.push(new NPC(this, npcMenuVehicle.data, startGridSlot.position.clone(),
                 this.track.startDirection.clone(),
-                startGridSlot.rotation.clone(), firstCheckpoint, debug));
+                startGridSlot.rotation.clone(), firstCheckpoint, debug, this.audioEnabled));
         }
 
         this.setupRaceVehicleStates(playerMenuVehicle);
+        this.setupNpcPlannerClient();
 
         if (debug) {
             // set up debugger
@@ -1183,10 +1213,12 @@ export default class GameScene extends THREE.Scene {
             const lightingGroup = this.debugger.addFolder("Lighting");
             lightingGroup.add(light, "intensity", 0, 2.0);
 
-            const filterGroup = this.debugger.addFolder("Filter");
-            filterGroup.add(this.filter, "strength", 0.0, 100.0);
-            filterGroup.add(this.filter, "radius", 0.0, 5.0);
-            filterGroup.add(this.filter, "threshold", 0.0, 1.0);
+            if (this.filter) {
+                const filterGroup = this.debugger.addFolder("Filter");
+                filterGroup.add(this.filter, "strength", 0.0, 100.0);
+                filterGroup.add(this.filter, "radius", 0.0, 5.0);
+                filterGroup.add(this.filter, "threshold", 0.0, 1.0);
+            }
 
             this.debugger.close();
         }
@@ -1398,6 +1430,35 @@ export default class GameScene extends THREE.Scene {
         }
 
         this.raceVehicleStates = states;
+    }
+
+    setupNpcPlannerClient() {
+        this.npcPlannerClient?.dispose();
+        this.npcPlannerClient = undefined;
+        this.npcSnapshotId = 0;
+
+        if (!this.track.npcTrackGraph)
+            return;
+
+        this.npcPlannerClient = new NpcPlannerClient(raceNpc.asyncPlanner);
+        this.npcPlannerClient.initialize(this.track.npcTrackGraph);
+        this.userData.npcPlannerValidation = this.track.npcTrackGraph.validation;
+    }
+
+    publishNpcPlannerSnapshot(raceRunningMs: number): number {
+        if (!this.npcPlannerClient)
+            return performance.now();
+
+        let timestampMs = performance.now();
+        let snapshot = buildRaceSnapshot(
+            ++this.npcSnapshotId,
+            raceRunningMs,
+            timestampMs,
+            this.raceVehicleStates,
+        );
+        this.npcPlannerClient.publishSnapshot(snapshot);
+        this.userData.npcPlannerSnapshotId = this.npcSnapshotId;
+        return timestampMs;
     }
 
     getVehicleTailPosition(vehicle: Vehicle): THREE.Vector3 {
@@ -2133,19 +2194,27 @@ export default class GameScene extends THREE.Scene {
         let raceRunningMs = Math.max(0, this.countdown - 6000);
         let playerControls = this.finished ? {} : this.keysPressed;
         this.player.update(this.track, dt, playerControls);
-        let listenerState = this.player.createEngineAudioListenerState();
-        this.player.updateEngineAudio(dt, listenerState);
+        let listenerState = this.audioEnabled ?
+            this.player.createEngineAudioListenerState() :
+            undefined;
+        if (this.audioEnabled)
+            this.player.updateEngineAudio(dt, listenerState);
+        let plannerNowMs = this.publishNpcPlannerSnapshot(raceRunningMs);
 
         for (let i = 0; i < this.npcs.length; i++) {
             let npc = this.npcs[i];
             let npcState = this.raceVehicleStates[i + 1];
             npc.update(this.track, dt, {
+                asyncPlan: npcState ?
+                    this.npcPlannerClient?.getPlan(npcState.id, plannerNowMs) :
+                    undefined,
                 draftRelations: this.draftRelations,
                 raceRunningMs,
                 selfId: npcState?.id,
                 vehicleStates: this.raceVehicleStates,
             });
-            npc.updateEngineAudio(dt, listenerState);
+            if (this.audioEnabled)
+                npc.updateEngineAudio(dt, listenerState);
         }
 
         this.recordPlayerTelemetry(dt);
@@ -2169,6 +2238,8 @@ export default class GameScene extends THREE.Scene {
 
         this.active = true;
         this.resetUi();
+        if (!this.npcPlannerClient)
+            this.setupNpcPlannerClient();
         if (this.fadeInTimeout)
             window.clearTimeout(this.fadeInTimeout);
         this.fadeInTimeout = window.setTimeout(() => {
@@ -2194,6 +2265,8 @@ export default class GameScene extends THREE.Scene {
         }
         this.keysPressed = {};
         this.ui.joystick.style.display = "none";
+        this.npcPlannerClient?.dispose();
+        this.npcPlannerClient = undefined;
         window.removeEventListener("resize", this.handleResizeBound, false);
         window.removeEventListener("keydown", this.handleKeyDownBound);
         window.removeEventListener("keyup", this.handleKeyUpBound);

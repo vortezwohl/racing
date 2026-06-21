@@ -10,6 +10,8 @@ import {
 } from "../utils/interfaces";
 import { debugAxes, debugPoints, debugLine, debugVector } from "../utils/debug";
 import { Sign, StartLine } from "../decorations/decorations";
+import { buildTrackGraph } from "../ai/npcRacing/trackGraph";
+import { TrackGraph } from "../ai/npcRacing/types";
 
 type TrackSegmentType = "corner" | "hairpin" | "straight" | "sweeper";
 
@@ -71,6 +73,7 @@ export default class Track {
     pathPlanningSamples: Array<TrackPlanningSample>;
     pathSegmentTypes: Array<TrackSegmentType>;
     pathCorridorHalfWidths: Array<number>;
+    npcTrackGraph?: TrackGraph;
     totalPathLength: number;
 
     constructor(scene: THREE.Scene, trackData: TrackData, debug?: boolean) {
@@ -88,6 +91,7 @@ export default class Track {
         this.pathPlanningSamples = [];
         this.pathSegmentTypes = [];
         this.pathCorridorHalfWidths = [];
+        this.npcTrackGraph = undefined;
         this.totalPathLength = 0;
 
         this.createCheckpoints(trackData.checkpoints, scene, debug);
@@ -725,6 +729,7 @@ export default class Track {
         this.resetPathData();
 
         let [collisionLayer, ...visibleLayers] = trackData.layerData;
+        this.npcTrackGraph = buildTrackGraph(trackData);
         this.body = this.createTrack(
             trackData.curveData,
             collisionLayer,

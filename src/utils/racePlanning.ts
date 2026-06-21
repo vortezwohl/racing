@@ -50,6 +50,7 @@ type PlannerNode = {
     lateralVelocity: number;
     parent?: PlannerNode;
     projectedSpeed: number;
+    speedMode: "brake" | "coast" | "throttle";
     samples: Array<PlannedTrajectorySample>;
     score: number;
 };
@@ -65,6 +66,8 @@ type PlannedTrajectorySample = {
     segmentType: TrackSegmentType;
     signedCurvature: number;
     tangent: THREE.Vector3;
+    speedMode: "brake" | "coast" | "throttle";
+    projectedSpeed: number;
     targetSpeed: number;
     worldPoint: THREE.Vector3;
 };
@@ -156,16 +159,21 @@ type BuildNpcTrajectoryPlanOptions = {
         overtakeBiasScale: number;
         overtakeLookAheadDistance: number;
         plannerAccelerationScale: number;
+        plannerBrakeScale: number;
+        plannerCoastScale: number;
+        plannerEmergencyBrakeScale: number;
         plannerMaxSpeedSafety: number;
         previewExecutionDistance: number;
         recoveryCenteringGain: number;
         recoveryDistanceLimit: number;
         recoveryThrottleCap: number;
+        recoveryTargetOffsetGain: number;
         safetyMargin: number;
         segmentCount: number;
         segmentDistanceMin: number;
         segmentDistanceSpeedScale: number;
         sideAttackChance: number;
+        speedModeChangePenalty: number;
         speedBrakeGain: number;
         speedLookAheadBlend: number;
         speedThrottleGain: number;
@@ -176,6 +184,10 @@ type BuildNpcTrajectoryPlanOptions = {
         transitionPenalty: number;
         viabilityControlDemandLimit: number;
         viabilityPredictionWindow: number;
+        guardianFullBrakeOverspeed: number;
+        guardianFullBrakeTrackRisk: number;
+        brakeExecutionScale: number;
+        emergencyBrakeExecutionScale: number;
     };
 };
 
@@ -264,6 +276,62 @@ const getCorridorLimit = (
 ): number => sample.corridorHalfWidth *
     plannerConfig.maxLaneUsage *
     getSegmentCorridorScale(sample, plannerConfig, isRecovering, guardianMode);
+
+const getSpeedModesForSample = (
+    sample: TrackPlanningSample,
+    futureContext: TrackFutureContext,
+    guardianMode: boolean,
+    forceEmergencyBrake: boolean,
+): Array<"brake" | "coast" | "throttle"> => {
+    if (forceEmergencyBrake)
+        return ["brake"];
+
+    if (guardianMode || sample.segmentType === "hairpin")
+        return ["coast", "throttle", "brake"];
+
+    if (sample.segmentType === "corner")
+        return ["throttle", "coast", "brake"];
+
+    if (futureContext.segmentType === "corner" || futureContext.segmentType === "hairpin")
+        return ["coast", "brake", "throttle"];
+
+    return ["throttle", "coast", "brake"];
+};
+
+const projectSpeedForMode = (
+    currentSpeed: number,
+    segmentDistance: number,
+    speedMode: "brake" | "coast" | "throttle",
+    futureContext: TrackFutureContext,
+    plannerConfig: BuildNpcTrajectoryPlanOptions["plannerConfig"],
+    maxSpeed: number,
+    forceEmergencyBrake: boolean,
+): number => {
+    let nextSpeed = currentSpeed;
+    let curvatureBrakeBias = 1 + futureContext.maxCurvature * 5.5;
+    if (speedMode === "throttle") {
+        nextSpeed += plannerConfig.plannerAccelerationScale * segmentDistance;
+    } else if (speedMode === "coast") {
+        nextSpeed -= plannerConfig.maxBrakePerMeter *
+            plannerConfig.plannerCoastScale *
+            segmentDistance *
+            curvatureBrakeBias;
+    } else {
+        let brakeScale = forceEmergencyBrake ?
+            plannerConfig.plannerEmergencyBrakeScale :
+            plannerConfig.plannerBrakeScale;
+        nextSpeed -= plannerConfig.maxBrakePerMeter *
+            brakeScale *
+            segmentDistance *
+            curvatureBrakeBias;
+    }
+
+    return THREE.MathUtils.clamp(
+        nextSpeed,
+        plannerConfig.minRollingSpeed,
+        maxSpeed,
+    );
+};
 
 const buildPlannerWeights = (
     futureContext: TrackFutureContext,
@@ -674,8 +742,10 @@ const evaluateProjectedTrackRisk = (
             lateral: futureSample.lateral.clone(),
             lateralOffset: stabilizingOffset,
             point: futureSample.point.clone(),
+            projectedSpeed,
             segmentType: futureSample.segmentType,
             signedCurvature: futureSample.signedCurvature,
+            speedMode: "coast",
             tangent: futureSample.tangent.clone(),
             targetSpeed: 0,
             worldPoint,
@@ -875,6 +945,8 @@ const getLookAheadSafeSpeed = (
             point: planningSample.point.clone(),
             segmentType: planningSample.segmentType,
             signedCurvature: planningSample.signedCurvature,
+            speedMode: "coast",
+            projectedSpeed: maxSpeed,
             tangent: planningSample.tangent.clone(),
             targetSpeed: 0,
             worldPoint,
@@ -956,12 +1028,15 @@ const solveSpeedEnvelope = (
     let speeds = new Array(samples.length).fill(maxSpeed);
 
     for (let i = 0; i < samples.length; i++)
-        speeds[i] = getSampleSpeedLimit(
-            samples[i],
-            i > 0 ? samples[i - 1] : undefined,
-            plannerConfig,
-            profile,
-            maxSpeed,
+        speeds[i] = Math.min(
+            getSampleSpeedLimit(
+                samples[i],
+                i > 0 ? samples[i - 1] : undefined,
+                plannerConfig,
+                profile,
+                maxSpeed,
+            ),
+            Math.max(samples[i].projectedSpeed, plannerConfig.minRollingSpeed),
         );
 
     let currentSpeed = vehicle.velocity.length();
@@ -1103,17 +1178,22 @@ const convertPlanToControls = (
     let upcomingBrakeDemand = clamp01(
         (currentSpeed - immediateTargetSpeed) / 0.18,
     );
+    let branchBrakeBias = steerSample.speedMode === "brake" ? 0.32 :
+        steerSample.speedMode === "coast" ? 0.12 :
+            0;
 
     let throttle = clamp01(
         plannerConfig.fallbackThrottle +
         speedError * plannerConfig.speedThrottleGain -
         cornerSeverity * 0.24 -
-        upcomingBrakeDemand * 0.34,
+        upcomingBrakeDemand * 0.34 -
+        branchBrakeBias,
     );
     let brake = clamp01(
         -speedError * plannerConfig.speedBrakeGain +
         cornerSeverity * plannerConfig.cornerBrakeScale * overspeedPressure +
-        upcomingBrakeDemand * (0.36 + cornerSeverity * 0.22),
+        upcomingBrakeDemand * (0.36 + cornerSeverity * 0.22) +
+        branchBrakeBias,
     );
 
     if (speedError < 0)
@@ -1126,10 +1206,21 @@ const convertPlanToControls = (
         brake = Math.max(brake, 0.18 + corridorPressure * 0.3);
     }
 
-    let rollingThrottleFloor = cornerSeverity > 0.55 ? 0.02 : plannerConfig.minRollingSpeed * 0.18;
+    if (brake > 0.8)
+        throttle = 0;
+    else if (brake > 0.5)
+        throttle = Math.min(throttle, 0.12);
+
+    let rollingThrottleFloor = brake > 0.72 ?
+        0 :
+        cornerSeverity > 0.55 ?
+            0.02 :
+            plannerConfig.minRollingSpeed * 0.18;
     throttle = Math.max(throttle, rollingThrottleFloor);
     let steerAssist = 1 + cornerSeverity * 0.35 + controlDemand * 0.22;
-    let brakeAssist = 1 + cornerSeverity * 0.25 + overspeedPressure * 0.42;
+    let brakeAssist = (
+        1 + cornerSeverity * 0.25 + overspeedPressure * 0.42
+    ) * plannerConfig.brakeExecutionScale;
 
     return {
         cornerSeverity,
@@ -1173,18 +1264,20 @@ const buildFallbackPlan = (
             point: sample.point.clone(),
             segmentType: sample.segmentType,
             signedCurvature: sample.signedCurvature,
+            speedMode: "brake",
+            projectedSpeed: plannerConfig.minRollingSpeed,
             tangent: sample.tangent.clone(),
             targetSpeed: plannerConfig.minRollingSpeed,
             worldPoint,
         }],
         score: -Infinity,
-        targetBrake: plannerConfig.fallbackBrake,
-        targetBrakeScale: 1.1,
+        targetBrake: 1,
+        targetBrakeScale: plannerConfig.emergencyBrakeExecutionScale,
         targetLaneOffset: 0,
         targetSpeed: plannerConfig.minRollingSpeed,
         targetSteer: 0,
         targetSteerScale: 1.1,
-        targetThrottle: plannerConfig.fallbackThrottle,
+        targetThrottle: 0,
         trackArcLength,
     };
 };
@@ -1289,12 +1382,22 @@ const buildNpcTrajectoryPlan = (
     let activeCorridorScale = recoveryState.isRecovering ?
         plannerConfig.cornerCorridorShrink :
         1;
+    let currentCorridorPressure = Math.abs(currentTrack.lateralOffset) /
+        Math.max(currentSample.corridorHalfWidth, 0.0001);
+    let speedOvershoot = currentSpeed - currentSafeSpeed;
     let guardianMode = recoveryState.isRecovering ||
-        currentSpeed - currentSafeSpeed > plannerConfig.guardianOverspeedThreshold ||
-        overspeedPressure > plannerConfig.guardianOverspeedThreshold ||
+        speedOvershoot > plannerConfig.guardianOverspeedThreshold &&
+        futureContext.segmentType !== "straight" ||
+        overspeedPressure > plannerConfig.guardianOverspeedThreshold &&
+        futureContext.segmentType !== "straight" ||
         projectedTrackRisk > 0.4 ||
-        Math.abs(currentTrack.lateralOffset) / Math.max(currentSample.corridorHalfWidth, 0.0001) >
-        plannerConfig.guardianCorridorThreshold;
+        currentCorridorPressure > plannerConfig.guardianCorridorThreshold;
+    let hardRecoveryMode = guardianMode && (
+        speedOvershoot > plannerConfig.guardianFullBrakeOverspeed &&
+        futureContext.segmentType !== "straight" ||
+        projectedTrackRisk > plannerConfig.guardianFullBrakeTrackRisk ||
+        currentCorridorPressure > 0.86
+    );
     let initialNode: PlannerNode = {
         arcLength: currentTrack.arcLength,
         collisionRisk: 0,
@@ -1309,8 +1412,10 @@ const buildNpcTrajectoryPlan = (
         samples: [],
         score: 0,
         projectedSpeed: currentSpeed,
+        speedMode: hardRecoveryMode ? "brake" : "coast",
     };
     let frontier: Array<PlannerNode> = [initialNode];
+    let maxPlannerSpeed = vehicle.getEffectiveMaxSpeed() * plannerConfig.plannerMaxSpeedSafety;
 
     for (let step = 0; step < segmentCount; step++) {
         let nextFrontier: Array<PlannerNode> = [];
@@ -1328,11 +1433,19 @@ const buildNpcTrajectoryPlan = (
                     recoveryState.isRecovering,
                     guardianMode,
                 ) * activeCorridorScale;
+                let forceEmergencyBrake = hardRecoveryMode ||
+                    planningSample.segmentType === "hairpin" &&
+                    node.projectedSpeed > currentSafeSpeed + 0.08 ||
+                    planningSample.segmentType === "corner" &&
+                    projectedTrackRisk > 0.72;
                 let targetOffset = THREE.MathUtils.clamp(
                     THREE.MathUtils.lerp(
                         node.lateralOffset,
-                        laneTarget,
-                        localFutureContext.segmentType === "straight" ? 0.62 : 0.48,
+                        hardRecoveryMode ?
+                            currentTrack.lateralOffset * (1 - plannerConfig.recoveryTargetOffsetGain) :
+                            laneTarget,
+                        hardRecoveryMode ? 0.82 :
+                            localFutureContext.segmentType === "straight" ? 0.62 : 0.48,
                     ),
                     -corridorLimit,
                     corridorLimit,
@@ -1341,126 +1454,170 @@ const buildNpcTrajectoryPlan = (
                     planningSample.lateral.clone().multiplyScalar(targetOffset),
                 );
                 let deltaOffset = targetOffset - node.lateralOffset;
-                let futureTimeMs = node.futureTimeMs +
-                    (segmentDistance / Math.max(
-                        node.projectedSpeed,
-                        plannerConfig.minRollingSpeed,
-                    )) * 16.67;
-                let collisionRisk = evaluateCollisionRisk(
-                    track,
-                    planningSample.arcLength,
-                    worldPoint,
-                    futureTimeMs,
-                    targetContext.projectedVehicles,
-                    plannerConfig,
-                );
-                let corridorPressure = clamp01(
-                    Math.abs(targetOffset) /
-                    Math.max(corridorLimit * plannerConfig.safetyMargin, 0.0001),
-                );
-                let controlDemand = clamp01(
-                    Math.abs(deltaOffset) / Math.max(segmentDistance, 0.0001) * 0.8 +
-                    planningSample.curvature * 8,
-                );
-                let projectedSpeed = Math.min(
-                    node.projectedSpeed + plannerConfig.plannerAccelerationScale * segmentDistance,
-                    vehicle.getEffectiveMaxSpeed() * plannerConfig.plannerMaxSpeedSafety,
-                );
-                if (!isCandidateViable(
-                    track,
-                    vehicle,
-                    planningSample.arcLength,
-                    targetOffset,
-                    corridorLimit,
-                    segmentDistance,
-                    projectedSpeed,
-                    deltaOffset / Math.max(segmentDistance, 0.0001),
-                    controlDemand,
-                    plannerConfig,
-                    profile,
+                let speedModes = getSpeedModesForSample(
+                    planningSample,
+                    localFutureContext,
                     guardianMode,
-                )) {
-                    continue;
-                }
-                let cornerSpace = evaluateCornerSpacePenalty(
-                    track,
-                    planningSample.arcLength,
-                    targetOffset,
-                    targetContext,
-                    plannerConfig,
+                    forceEmergencyBrake,
                 );
-                if (cornerSpace.unsafe)
-                    continue;
-                let { intent, reward } = getRacecraftReward(
-                    track,
-                    planningSample.arcLength,
-                    targetOffset,
-                    targetContext,
-                    weights,
-                );
-                let linkedCornerDesiredOffset = -localFutureContext.cornerSign *
-                    corridorLimit * plannerConfig.cornerEntryOffsetScale * 0.9;
-                let linkedExitOffset = localFutureContext.linkedCornerSign *
-                    corridorLimit * plannerConfig.cornerExitOffsetScale;
-                let lineReferenceOffset = THREE.MathUtils.lerp(
-                    linkedCornerDesiredOffset,
-                    linkedExitOffset,
-                    localFutureContext.linkedCornerStrength * 0.55,
-                );
-                let lineReward = (1 - clamp01(
-                    Math.abs(targetOffset - lineReferenceOffset) /
-                    Math.max(corridorLimit * 1.15, 0.0001),
-                )) * (
-                    planningSample.curvature * 1.2 +
-                    localFutureContext.linkedCornerStrength * 0.3 +
-                    localFutureContext.straightDistance * 0.01
-                );
-                let progressReward = segmentDistance * weights.progressReward;
-                let smoothnessPenalty = Math.abs(deltaOffset) * weights.smoothnessPenalty;
-                let controlPenalty = controlDemand * weights.controlPenalty;
-                let trackPenalty = corridorPressure * weights.trackSafetyPenalty;
-                let collisionPenalty = (collisionRisk + cornerSpace.penalty * 0.8) *
-                    weights.collisionPenalty;
-                let recoveryReward = recoveryState.isRecovering ?
-                    weights.recoveryBias * (1 - corridorPressure) :
-                    0;
-                let nodeScore = node.score +
-                    progressReward +
-                    reward +
-                    lineReward +
-                    recoveryReward -
-                    smoothnessPenalty -
-                    controlPenalty -
-                    trackPenalty -
-                    collisionPenalty;
+                for (let speedMode of speedModes) {
+                    let projectedSpeed = projectSpeedForMode(
+                        node.projectedSpeed,
+                        segmentDistance,
+                        speedMode,
+                        localFutureContext,
+                        plannerConfig,
+                        maxPlannerSpeed,
+                        forceEmergencyBrake,
+                    );
+                    let futureTimeMs = node.futureTimeMs +
+                        (segmentDistance / Math.max(
+                            projectedSpeed,
+                            plannerConfig.minRollingSpeed,
+                        )) * 16.67;
+                    let collisionRisk = evaluateCollisionRisk(
+                        track,
+                        planningSample.arcLength,
+                        worldPoint,
+                        futureTimeMs,
+                        targetContext.projectedVehicles,
+                        plannerConfig,
+                    );
+                    let corridorPressure = clamp01(
+                        Math.abs(targetOffset) /
+                        Math.max(corridorLimit * plannerConfig.safetyMargin, 0.0001),
+                    );
+                    let controlDemand = clamp01(
+                        Math.abs(deltaOffset) / Math.max(segmentDistance, 0.0001) * 0.8 +
+                        planningSample.curvature * 8,
+                    );
+                    if (!isCandidateViable(
+                        track,
+                        vehicle,
+                        planningSample.arcLength,
+                        targetOffset,
+                        corridorLimit,
+                        segmentDistance,
+                        projectedSpeed,
+                        deltaOffset / Math.max(segmentDistance, 0.0001),
+                        controlDemand,
+                        plannerConfig,
+                        profile,
+                        guardianMode,
+                    )) {
+                        continue;
+                    }
+                    let cornerSpace = evaluateCornerSpacePenalty(
+                        track,
+                        planningSample.arcLength,
+                        targetOffset,
+                        targetContext,
+                        plannerConfig,
+                    );
+                    if (cornerSpace.unsafe)
+                        continue;
+                    let { intent, reward } = getRacecraftReward(
+                        track,
+                        planningSample.arcLength,
+                        targetOffset,
+                        targetContext,
+                        weights,
+                    );
+                    let linkedCornerDesiredOffset = -localFutureContext.cornerSign *
+                        corridorLimit * plannerConfig.cornerEntryOffsetScale * 0.9;
+                    let linkedExitOffset = localFutureContext.linkedCornerSign *
+                        corridorLimit * plannerConfig.cornerExitOffsetScale;
+                    let lineReferenceOffset = THREE.MathUtils.lerp(
+                        linkedCornerDesiredOffset,
+                        linkedExitOffset,
+                        localFutureContext.linkedCornerStrength * 0.55,
+                    );
+                    let lineReward = (1 - clamp01(
+                        Math.abs(targetOffset - lineReferenceOffset) /
+                        Math.max(corridorLimit * 1.15, 0.0001),
+                    )) * (
+                        planningSample.curvature * 1.2 +
+                        localFutureContext.linkedCornerStrength * 0.3 +
+                        localFutureContext.straightDistance * 0.01
+                    );
+                    let progressReward = segmentDistance * weights.progressReward;
+                    let smoothnessPenalty = Math.abs(deltaOffset) * weights.smoothnessPenalty;
+                    let controlPenalty = controlDemand * weights.controlPenalty;
+                    let trackPenalty = corridorPressure * weights.trackSafetyPenalty;
+                    let collisionPenalty = (collisionRisk + cornerSpace.penalty * 0.8) *
+                        weights.collisionPenalty;
+                    let recoveryReward = recoveryState.isRecovering ?
+                        weights.recoveryBias * (1 - corridorPressure) :
+                        0;
+                    let speedModePenalty = speedMode === "brake" ?
+                        (
+                            localFutureContext.segmentType === "straight" &&
+                            corridorPressure < 0.42 &&
+                            collisionRisk < 0.22
+                        ) ?
+                            plannerConfig.speedModeChangePenalty * 1.35 :
+                            plannerConfig.speedModeChangePenalty * 0.42 :
+                        speedMode === "coast" ?
+                            localFutureContext.segmentType === "straight" ?
+                                plannerConfig.speedModeChangePenalty * 0.32 :
+                                plannerConfig.speedModeChangePenalty * 0.18 :
+                            0;
+                    let throttleReward = speedMode === "throttle" ?
+                        localFutureContext.segmentType === "straight" ?
+                            0.08 + Math.max(0, 0.04 - collisionRisk * 0.05) :
+                        localFutureContext.segmentType === "sweeper" &&
+                            corridorPressure < 0.55 &&
+                            projectedSpeed <= currentSafeSpeed + 0.04 ?
+                            0.025 :
+                            0 :
+                        0;
+                    let modeTransitionPenalty = speedMode !== node.speedMode ?
+                        plannerConfig.speedModeChangePenalty :
+                        0;
+                    let nodeScore = node.score +
+                        progressReward +
+                        reward +
+                        lineReward +
+                        recoveryReward +
+                        throttleReward -
+                        smoothnessPenalty -
+                        controlPenalty -
+                        trackPenalty -
+                        collisionPenalty -
+                        speedModePenalty -
+                        modeTransitionPenalty;
 
-                let sample: PlannedTrajectorySample = {
-                    arcLength: planningSample.arcLength,
-                    corridorHalfWidth: corridorLimit,
-                    curvature: planningSample.curvature,
-                    futureTimeMs,
-                    lateral: planningSample.lateral.clone(),
-                    lateralOffset: targetOffset,
-                    point: planningSample.point.clone(),
-                    segmentType: planningSample.segmentType,
-                    signedCurvature: planningSample.signedCurvature,
-                    tangent: planningSample.tangent.clone(),
-                    targetSpeed: 0,
-                    worldPoint,
-                };
-                nextFrontier.push({
-                    arcLength: planningSample.arcLength,
-                    collisionRisk: Math.max(node.collisionRisk, collisionRisk),
-                    corridorPressure: Math.max(node.corridorPressure, corridorPressure),
-                    cumulativeCurvature: node.cumulativeCurvature + planningSample.curvature,
-                    futureTimeMs,
-                    lateralOffset: targetOffset,
-                    lateralVelocity: deltaOffset / Math.max(segmentDistance, 0.0001),
-                    parent: node,
-                    projectedSpeed,
-                    samples: [...node.samples, sample],
-                    score: nodeScore + (intent ? 0.01 : 0),
-                });
+                    let sample: PlannedTrajectorySample = {
+                        arcLength: planningSample.arcLength,
+                        corridorHalfWidth: corridorLimit,
+                        curvature: planningSample.curvature,
+                        futureTimeMs,
+                        lateral: planningSample.lateral.clone(),
+                        lateralOffset: targetOffset,
+                        point: planningSample.point.clone(),
+                        projectedSpeed,
+                        segmentType: planningSample.segmentType,
+                        signedCurvature: planningSample.signedCurvature,
+                        speedMode,
+                        tangent: planningSample.tangent.clone(),
+                        targetSpeed: 0,
+                        worldPoint,
+                    };
+                    nextFrontier.push({
+                        arcLength: planningSample.arcLength,
+                        collisionRisk: Math.max(node.collisionRisk, collisionRisk),
+                        corridorPressure: Math.max(node.corridorPressure, corridorPressure),
+                        cumulativeCurvature: node.cumulativeCurvature + planningSample.curvature,
+                        futureTimeMs,
+                        lateralOffset: targetOffset,
+                        lateralVelocity: deltaOffset / Math.max(segmentDistance, 0.0001),
+                        parent: node,
+                        projectedSpeed,
+                        samples: [...node.samples, sample],
+                        score: nodeScore + (intent ? 0.01 : 0),
+                        speedMode,
+                    });
+                }
             }
         }
 
@@ -1501,6 +1658,40 @@ const buildNpcTrajectoryPlan = (
         );
         controls.targetSteer *= plannerConfig.emergencySteerDamping;
         controls.targetBrakeScale *= plannerConfig.emergencyBrakeScale;
+    }
+    if (hardRecoveryMode) {
+        let recenterSample = track.samplePlanningAtArcLength(currentTrack.arcLength);
+        let recenterPoint = recenterSample.point.clone().add(
+            recenterSample.lateral.clone().multiplyScalar(
+                THREE.MathUtils.clamp(
+                    recoveryState.recoveryCenterOffset,
+                    -recenterSample.corridorHalfWidth * 0.18,
+                    recenterSample.corridorHalfWidth * 0.18,
+                ),
+            ),
+        );
+        let recenterDirection = recenterPoint.clone().sub(vehicle.position);
+        if (recenterDirection.lengthSq() > 0.0001) {
+            recenterDirection.normalize();
+            let currentDirection = vehicle.direction.clone().normalize();
+            let angle = currentDirection.angleTo(recenterDirection);
+            let sign = Math.sign(
+                currentDirection.clone()
+                    .cross(recenterDirection)
+                    .dot(vehicle.hitbox?.up || new THREE.Vector3(0, 1, 0)),
+            ) || 1;
+            controls.targetSteer = THREE.MathUtils.clamp(
+                (-angle * sign) / Math.max(plannerConfig.steeringGain * 0.7, 0.0001),
+                -1,
+                1,
+            );
+        }
+        controls.targetThrottle = 0;
+        controls.targetBrake = 1;
+        controls.targetBrakeScale = Math.max(
+            controls.targetBrakeScale * plannerConfig.emergencyBrakeExecutionScale,
+            plannerConfig.emergencyBrakeExecutionScale,
+        );
     }
     let leadingSample = samples[Math.min(1, samples.length - 1)] || samples[0];
     let intent = getRacecraftReward(

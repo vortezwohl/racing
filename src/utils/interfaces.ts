@@ -58,11 +58,23 @@ interface Checkpoint {
     index: number;
 }
 
+interface TrackConnectorData {
+    bidirectional?: boolean;
+    fromCurveIndex: number;
+    gapWidthLimit?: number;
+    headingDeltaLimit?: number;
+    overlapDistanceMin?: number;
+    toCurveIndex: number;
+    transitionType?: "lane-change" | "merge" | "split";
+    windowRatioRange?: [start: number, end: number];
+}
+
 interface TrackData {
     startPoint: THREE.Vector3;
     startDirection: THREE.Vector3;
     startRotation: THREE.Euler;
     curveData: Array<CurveData>;
+    connectors?: Array<TrackConnectorData>;
     layerData: Array<LayerData>;
     checkpoints: Array<CheckpointData>;
     backgroundColors: Array<string>;
@@ -104,7 +116,10 @@ interface MenuLayout {
 interface MenuSceneOptions {
     canvas: HTMLCanvasElement;
     curtain: HTMLElement;
+    disableAudio?: boolean;
+    disablePostProcessing?: boolean;
     onPlay?: (speederIndex: number) => void;
+    safeMode?: boolean;
 }
 
 interface RaceUi {
@@ -119,9 +134,13 @@ interface RaceUi {
 interface GameSceneOptions {
     canvas: HTMLCanvasElement;
     debug?: boolean;
+    disableAudio?: boolean;
+    disablePostProcessing?: boolean;
     finishPreview?: boolean;
+    observeMode?: boolean;
     onExitToMenu?: () => void;
     onRestartRace?: () => void;
+    safeMode?: boolean;
     speederIndex: number;
     ui: RaceUi;
 }
@@ -137,6 +156,7 @@ export {
     CheckpointData,
     Checkpoint,
     RaceUi,
+    TrackConnectorData,
     TrackData,
     VehicleData
 }

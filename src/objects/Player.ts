@@ -9,25 +9,30 @@ export default class Player extends Vehicle {
     camera: THREE.PerspectiveCamera;
     manualCamera: boolean = false;
     orbitals?: OrbitControls;
+    audioEnabled: boolean;
 
     constructor(scene: THREE.Scene, camera: THREE.PerspectiveCamera,
         vehicleData: VehicleData, position: THREE.Vector3, direction: THREE.Vector3,
         rotation: THREE.Euler, checkpoint: Checkpoint,
-        debug?: boolean, orbitals?: OrbitControls) {
+        debug?: boolean, orbitals?: OrbitControls, audioEnabled: boolean = true) {
 
         super(scene, vehicleData, position, direction, 
             rotation, checkpoint, debug);
         this.camera = camera;
         this.orbitals = orbitals;
+        this.audioEnabled = audioEnabled;
 
-        this.sounds = {
-            "complete-lap": new Audio("./assets/sounds/complete-lap.wav"),
-            "complete-race": new Audio("./assets/sounds/complete-race.wav"),
-            "out-of-bounds": new Audio("./assets/sounds/out-of-bounds.wav")
-        };
-        this.sounds["complete-lap"].volume = 0.12;
-        this.sounds["complete-race"].volume = 0.12;
-        this.sounds["out-of-bounds"].volume = 0.12;
+        this.sounds = {};
+        if (this.audioEnabled) {
+            this.sounds = {
+                "complete-lap": new Audio("./assets/sounds/complete-lap.wav"),
+                "complete-race": new Audio("./assets/sounds/complete-race.wav"),
+                "out-of-bounds": new Audio("./assets/sounds/out-of-bounds.wav")
+            };
+            this.sounds["complete-lap"].volume = 0.12;
+            this.sounds["complete-race"].volume = 0.12;
+            this.sounds["out-of-bounds"].volume = 0.12;
+        }
 
         this.configureEngineAudio({
             baseGain: 0.08,
@@ -35,7 +40,8 @@ export default class Player extends Vehicle {
             harmonicGainAmount: 0.08,
             isLocalSource: true,
         });
-        this.initializeEngineAudio();
+        if (this.audioEnabled)
+            this.initializeEngineAudio();
     }
 
     handleCameraMovement(forward: boolean, follow: boolean = true) {

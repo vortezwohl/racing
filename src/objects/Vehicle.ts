@@ -33,6 +33,7 @@ export default class Vehicle {
     static sharedEngineAudioContext?: AudioContext;
     static sharedPulseWave?: PeriodicWave;
     static sharedPulseWaveContext?: AudioContext;
+    static engineAudioEnabled: boolean = true;
 
     acceleration: number;
     deceleration: number;
@@ -181,6 +182,9 @@ export default class Vehicle {
     }
 
     static getSharedEngineAudioContext(): AudioContext {
+        if (!Vehicle.engineAudioEnabled)
+            throw new Error("Engine audio is disabled.");
+
         if (!Vehicle.sharedEngineAudioContext ||
             Vehicle.sharedEngineAudioContext.state === "closed") {
             Vehicle.sharedEngineAudioContext = new AudioContext();
@@ -282,7 +286,7 @@ export default class Vehicle {
     }
 
     initializeEngineAudio() {
-        if (this.engineAudioInitialized)
+        if (this.engineAudioInitialized || !Vehicle.engineAudioEnabled)
             return;
 
         this.reserveEngineWaveformUsage();

@@ -33,6 +33,8 @@ export default class MenuScene extends THREE.Scene {
     camera: THREE.OrthographicCamera;
     canvas: HTMLCanvasElement;
     active: boolean;
+    disableAudio: boolean;
+    disablePostProcessing: boolean;
     handleKeydownBound: (event: KeyboardEvent) => void;
     handlePointerDownBound: (event: PointerEvent) => void;
     handleResizeBound: () => void;
@@ -86,6 +88,8 @@ export default class MenuScene extends THREE.Scene {
         this.width = window.innerWidth;
         this.height = window.innerHeight;
         this.curtain = options.curtain;
+        this.disableAudio = !!options.disableAudio;
+        this.disablePostProcessing = !!options.disablePostProcessing || !!options.safeMode;
         this.selectedIndex = 0;
         this.pointer = new THREE.Vector2();
         this.raycaster = new THREE.Raycaster();
@@ -113,12 +117,15 @@ export default class MenuScene extends THREE.Scene {
         this.transitionPlayableIndex = 0;
         this.textFontFamily = '"RaceName", "Trebuchet MS", "Verdana", sans-serif';
 
-        this.render();
+        void this.render();
 
-        this.sounds = {
-            "vehicle-select": new Audio("./assets/sounds/vehicle-select.wav")
-        };
-        this.sounds["vehicle-select"].volume = 0.18;
+        this.sounds = {};
+        if (!this.disableAudio) {
+            this.sounds = {
+                "vehicle-select": new Audio("./assets/sounds/vehicle-select.wav")
+            };
+            this.sounds["vehicle-select"].volume = 0.18;
+        }
         this.activate();
     }
 
@@ -761,8 +768,10 @@ export default class MenuScene extends THREE.Scene {
 
         this.renderer.setPixelRatio(window.devicePixelRatio);
         this.renderer.setSize(this.width, this.height);
-        this.composer.setSize(this.width, this.height);
-        this.filter.setSize(this.width, this.height);
+        if (this.composer)
+            this.composer.setSize(this.width, this.height);
+        if (this.filter)
+            this.filter.setSize(this.width, this.height);
         this.updateLayout();
     }
 
@@ -884,15 +893,17 @@ export default class MenuScene extends THREE.Scene {
         this.renderer.setSize(this.width, this.height);
         this.renderer.domElement.style.background = "transparent";
 
-        this.composer = new EffectComposer(this.renderer);
-        this.composer.addPass(new RenderPass(this, this.camera));
-        this.filter = new UnrealBloomPass(
-            new THREE.Vector2(this.width, this.height),
-            1.2,
-            0.2,
-            0.86,
-        );
-        this.composer.addPass(this.filter);
+        if (!this.disablePostProcessing) {
+            this.composer = new EffectComposer(this.renderer);
+            this.composer.addPass(new RenderPass(this, this.camera));
+            this.filter = new UnrealBloomPass(
+                new THREE.Vector2(this.width, this.height),
+                1.2,
+                0.2,
+                0.86,
+            );
+            this.composer.addPass(this.filter);
+        }
 
         let ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
         this.add(ambientLight);

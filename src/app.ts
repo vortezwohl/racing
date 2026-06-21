@@ -1,18 +1,139 @@
-import GameScene from "./scenes/GameScene";
-import MenuScene from "./scenes/MenuScene";
 import { RaceUi } from "./utils/interfaces";
+import type GameScene from "./scenes/GameScene";
+import type MenuScene from "./scenes/MenuScene";
 
 type AppRoute =
     | { view: "menu" }
-    | { finishPreview?: boolean; speederIndex: number; view: "race" };
+    | {
+        disableAudio?: boolean;
+        disablePostProcessing?: boolean;
+        finishPreview?: boolean;
+        observeMode?: boolean;
+        safeMode?: boolean;
+        speederIndex: number;
+        view: "race";
+    };
+
+type BootState =
+    | "booting"
+    | "loading-modules"
+    | "constructing-shell"
+    | "starting"
+    | "syncing-route"
+    | "running"
+    | "failed";
+
+type GameSceneClass = typeof import("./scenes/GameScene").default;
+type MenuSceneClass = typeof import("./scenes/MenuScene").default;
 
 type DebugWindow = Window & typeof globalThis & {
     __appShell?: AppShell;
+    __bootError?: {
+        message: string;
+        stack?: string;
+        state: BootState;
+        timestamp: string;
+    };
+    __bootState?: BootState;
     __gameScene?: GameScene | null;
     __menuScene?: MenuScene;
+    __npcPlannerDebug?: unknown;
 };
 
+const getDebugWindow = (): DebugWindow => window as DebugWindow;
+
+const setBootState = (state: BootState) => {
+    getDebugWindow().__bootState = state;
+};
+
+const normalizeError = (error: unknown): Error => {
+    if (error instanceof Error)
+        return error;
+
+    if (typeof error === "string")
+        return new Error(error);
+
+    return new Error("Unknown boot error.");
+};
+
+const renderBootErrorPanel = (error: Error) => {
+    let existing = document.getElementById("boot-error-panel");
+    if (existing)
+        existing.remove();
+
+    let panel = document.createElement("section");
+    panel.id = "boot-error-panel";
+    panel.setAttribute("role", "alert");
+    panel.style.position = "fixed";
+    panel.style.inset = "0";
+    panel.style.zIndex = "9999";
+    panel.style.padding = "24px";
+    panel.style.overflow = "auto";
+    panel.style.background =
+        "linear-gradient(180deg, rgba(7,11,20,0.98) 0%, rgba(3,6,12,0.98) 100%)";
+    panel.style.color = "#d8f3ff";
+    panel.style.fontFamily = "\"Trebuchet MS\", \"Verdana\", sans-serif";
+
+    let title = document.createElement("h1");
+    title.textContent = "启动失败";
+    title.style.margin = "0 0 12px";
+    title.style.fontSize = "28px";
+    panel.appendChild(title);
+
+    let summary = document.createElement("p");
+    summary.textContent = error.message || "Unknown boot error.";
+    summary.style.margin = "0 0 16px";
+    summary.style.fontSize = "16px";
+    summary.style.lineHeight = "1.5";
+    panel.appendChild(summary);
+
+    let hint = document.createElement("p");
+    hint.textContent =
+        "请检查 window.__bootState 和 window.__bootError，或使用 safeMode/observe 参数重试。";
+    hint.style.margin = "0 0 16px";
+    hint.style.color = "#8ad8ff";
+    panel.appendChild(hint);
+
+    let pre = document.createElement("pre");
+    pre.textContent = error.stack || error.message;
+    pre.style.margin = "0";
+    pre.style.padding = "16px";
+    pre.style.whiteSpace = "pre-wrap";
+    pre.style.wordBreak = "break-word";
+    pre.style.border = "1px solid rgba(120, 210, 255, 0.25)";
+    pre.style.background = "rgba(10, 21, 40, 0.72)";
+    pre.style.borderRadius = "12px";
+    panel.appendChild(pre);
+
+    document.body.appendChild(panel);
+};
+
+const reportBootError = (error: unknown) => {
+    let normalizedError = normalizeError(error);
+    let debugWindow = getDebugWindow();
+    let state = debugWindow.__bootState || "failed";
+    debugWindow.__bootState = "failed";
+    debugWindow.__bootError = {
+        message: normalizedError.message,
+        stack: normalizedError.stack,
+        state,
+        timestamp: new Date().toISOString(),
+    };
+    console.error("[boot] failed", normalizedError);
+    renderBootErrorPanel(normalizedError);
+};
+
+window.addEventListener("error", (event: ErrorEvent) => {
+    reportBootError(event.error || event.message);
+});
+
+window.addEventListener("unhandledrejection", (event: PromiseRejectionEvent) => {
+    reportBootError(event.reason);
+});
+
 class AppShell {
+    GameSceneClass: GameSceneClass;
+    MenuSceneClass: MenuSceneClass;
     currentScene: GameScene | MenuScene | null;
     currentTime: number;
     gameCanvas: HTMLCanvasElement;
@@ -25,8 +146,15 @@ class AppShell {
     raceView: HTMLElement;
     returnToMenuFadeTimeout?: number;
     returnToMenuSwitchTimeout?: number;
+    runtimeRoute: AppRoute;
 
-    constructor() {
+    constructor(sceneConstructors: {
+        GameScene: GameSceneClass;
+        MenuScene: MenuSceneClass;
+    }) {
+        setBootState("constructing-shell");
+        this.GameSceneClass = sceneConstructors.GameScene;
+        this.MenuSceneClass = sceneConstructors.MenuScene;
         this.currentScene = null;
         this.currentTime = 0;
         this.gameCanvas = this.requireElement<HTMLCanvasElement>("game");
@@ -43,6 +171,7 @@ class AppShell {
             knob: this.requireElement<HTMLElement>("knob"),
             markerHost: this.requireElement<HTMLElement>("marker-layer"),
         };
+        this.runtimeRoute = this.getRoute();
         this.raceUi.curtain.style.position = "fixed";
         this.raceUi.curtain.style.inset = "0";
         this.raceUi.curtain.style.zIndex = "20";
@@ -51,12 +180,21 @@ class AppShell {
         this.raceUi.markerHost.style.zIndex = "12";
         this.raceUi.markerHost.style.pointerEvents = "none";
 
-        this.menuScene = new MenuScene({
+        this.menuScene = new this.MenuSceneClass({
             canvas: this.menuCanvas,
             curtain: this.raceUi.curtain,
+            disableAudio: this.runtimeRoute.view === "race" ?
+                !!this.runtimeRoute.disableAudio :
+                false,
+            disablePostProcessing: this.runtimeRoute.view === "race" ?
+                !!this.runtimeRoute.disablePostProcessing :
+                false,
             onPlay: (speederIndex: number) => {
                 this.navigateToRace(speederIndex);
             },
+            safeMode: this.runtimeRoute.view === "race" ?
+                !!this.runtimeRoute.safeMode :
+                false,
         });
         this.attachDebugRefs();
 
@@ -73,12 +211,24 @@ class AppShell {
         if (this.currentScene) {
             this.currentScene.update(dt);
             this.currentScene.camera.updateProjectionMatrix();
-            if (this.currentScene instanceof GameScene) {
-                this.currentScene.composer.render();
+            if (this.currentScene instanceof this.GameSceneClass) {
+                if (this.currentScene.composer)
+                    this.currentScene.composer.render();
+                else
+                    this.currentScene.renderer.render(
+                        this.currentScene,
+                        this.currentScene.camera,
+                    );
                 if (this.currentScene.orbitals)
                     this.currentScene.orbitals.update();
             } else {
-                this.currentScene.renderer.render(this.currentScene, this.currentScene.camera);
+                if (this.currentScene.composer)
+                    this.currentScene.composer.render();
+                else
+                    this.currentScene.renderer.render(
+                        this.currentScene,
+                        this.currentScene.camera,
+                    );
             }
         }
 
@@ -89,11 +239,26 @@ class AppShell {
         if (this.gameScene)
             this.gameScene.dispose();
 
-        this.gameScene = new GameScene({
+        let route = this.runtimeRoute.view === "race" ?
+            this.runtimeRoute :
+            {
+                disableAudio: false,
+                disablePostProcessing: false,
+                finishPreview: false,
+                observeMode: false,
+                safeMode: false,
+                speederIndex,
+                view: "race" as const,
+            };
+        this.gameScene = new this.GameSceneClass({
             canvas: this.gameCanvas,
-            finishPreview: false,
+            disableAudio: !!route.disableAudio,
+            disablePostProcessing: !!route.disablePostProcessing,
+            finishPreview: !!route.finishPreview,
+            observeMode: !!route.observeMode,
             onExitToMenu: () => this.navigateToMenu(),
             onRestartRace: () => this.navigateToRace(speederIndex),
+            safeMode: !!route.safeMode,
             speederIndex,
             ui: this.raceUi,
         });
@@ -107,8 +272,18 @@ class AppShell {
         if (path === "/race") {
             let parameters = new URLSearchParams(queryString || "");
             let speederIndex = parseInt(parameters.get("speeder") || "0", 10);
+            let safeMode = parameters.get("safeMode") === "1";
+            let observeMode = parameters.get("observe") === "1" ||
+                parameters.get("observeMode") === "1";
+            let disableAudio = safeMode || parameters.get("disableAudio") === "1";
+            let disablePostProcessing = safeMode ||
+                parameters.get("disablePostProcessing") === "1";
             return {
+                disableAudio,
+                disablePostProcessing,
                 finishPreview: parameters.get("finishPreview") === "1",
+                observeMode,
+                safeMode,
                 speederIndex: Number.isNaN(speederIndex) ? 0 : speederIndex,
                 view: "race",
             };
@@ -118,7 +293,7 @@ class AppShell {
     }
 
     navigateToMenu() {
-        if (this.currentScene instanceof GameScene) {
+        if (this.currentScene instanceof this.GameSceneClass) {
             this.beginReturnToMenuTransition();
             return;
         }
@@ -132,7 +307,22 @@ class AppShell {
     }
 
     navigateToRace(speederIndex: number) {
-        let nextHash = `#/race?speeder=${speederIndex}`;
+        let route = this.runtimeRoute.view === "race" ?
+            this.runtimeRoute :
+            undefined;
+        let parameters = new URLSearchParams();
+        parameters.set("speeder", `${speederIndex}`);
+        if (route?.finishPreview)
+            parameters.set("finishPreview", "1");
+        if (route?.safeMode)
+            parameters.set("safeMode", "1");
+        if (route?.observeMode)
+            parameters.set("observe", "1");
+        if (route?.disableAudio)
+            parameters.set("disableAudio", "1");
+        if (route?.disablePostProcessing)
+            parameters.set("disablePostProcessing", "1");
+        let nextHash = `#/race?${parameters.toString()}`;
         if (window.location.hash === nextHash) {
             this.syncRoute();
             return;
@@ -142,10 +332,11 @@ class AppShell {
     }
 
     attachDebugRefs() {
-        let debugWindow = window as DebugWindow;
+        let debugWindow = getDebugWindow();
         debugWindow.__appShell = this;
         debugWindow.__menuScene = this.menuScene;
         debugWindow.__gameScene = this.gameScene;
+        debugWindow.__npcPlannerDebug = this.gameScene?.npcPlannerClient?.getDebugSnapshot();
     }
 
     requireElement<T extends HTMLElement>(id: string): T {
@@ -212,9 +403,9 @@ class AppShell {
 
     syncActiveSceneViewport() {
         window.requestAnimationFrame(() => {
-            if (this.currentScene instanceof GameScene)
+            if (this.currentScene instanceof this.GameSceneClass)
                 this.currentScene.syncViewport();
-            else if (this.currentScene instanceof MenuScene)
+            else if (this.currentScene instanceof this.MenuSceneClass)
                 this.currentScene.syncViewport();
         });
     }
@@ -238,17 +429,23 @@ class AppShell {
     }
 
     start() {
+        setBootState("starting");
         if (!window.location.hash)
             window.location.hash = "#/menu";
 
         this.syncRoute();
         this.animate();
+        setBootState("running");
     }
 
     syncRoute() {
+        setBootState("syncing-route");
         let route = this.getRoute();
+        this.runtimeRoute = route;
 
         if (route.view === "menu") {
+            this.menuScene.disableAudio = false;
+            this.menuScene.disablePostProcessing = false;
             if (this.gameScene) {
                 this.gameScene.dispose();
                 this.gameScene = null;
@@ -263,9 +460,10 @@ class AppShell {
             return;
         }
 
+        this.menuScene.disableAudio = !!route.disableAudio;
+        this.menuScene.disablePostProcessing = !!route.disablePostProcessing;
         this.menuScene.deactivate();
         let gameScene = this.ensureGameScene(route.speederIndex);
-        gameScene.finishPreview = !!route.finishPreview;
         this.currentScene = gameScene;
         this.attachDebugRefs();
         this.setActiveView("race");
@@ -273,5 +471,23 @@ class AppShell {
     }
 }
 
-let app = new AppShell();
-app.start();
+setBootState("booting");
+
+async function bootstrapApp() {
+    try {
+        setBootState("loading-modules");
+        let [{ default: GameSceneModule }, { default: MenuSceneModule }] = await Promise.all([
+            import("./scenes/GameScene"),
+            import("./scenes/MenuScene"),
+        ]);
+        let app = new AppShell({
+            GameScene: GameSceneModule,
+            MenuScene: MenuSceneModule,
+        });
+        app.start();
+    } catch (error) {
+        reportBootError(error);
+    }
+}
+
+void bootstrapApp();

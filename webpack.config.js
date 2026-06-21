@@ -3,7 +3,8 @@ const path = require("path");
 module.exports = {
     mode: "none",
     entry: {
-        app: "./src/app.ts"
+        app: "./src/app.ts",
+        npcPlannerWorker: "./src/ai/npcRacing/plannerWorker.ts"
     },
     
     output: {

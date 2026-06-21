@@ -5,6 +5,28 @@ let track_1: TrackData = {
     startPoint: new THREE.Vector3(0, 0, 0),
     startDirection: new THREE.Vector3(1, 0, 0),
     startRotation: new THREE.Euler(0, Math.PI / 2, 0, "YZX"),
+    connectors: [
+        {
+            bidirectional: true,
+            fromCurveIndex: 1,
+            gapWidthLimit: 18,
+            headingDeltaLimit: 0.18,
+            overlapDistanceMin: 180,
+            toCurveIndex: 2,
+            transitionType: "lane-change",
+            windowRatioRange: [0.08, 0.9],
+        },
+        {
+            bidirectional: true,
+            fromCurveIndex: 6,
+            gapWidthLimit: 18,
+            headingDeltaLimit: 0.18,
+            overlapDistanceMin: 120,
+            toCurveIndex: 7,
+            transitionType: "lane-change",
+            windowRatioRange: [0.08, 0.92],
+        },
+    ],
     curveData: [
         {
             points: [[-100, 0, 0], [150, 0, 0]],
