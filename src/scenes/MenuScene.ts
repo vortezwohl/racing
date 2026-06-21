@@ -925,25 +925,25 @@ export default class MenuScene extends THREE.Scene {
             this.composer.addPass(new RenderPass(this, this.camera));
             this.filter = new UnrealBloomPass(
                 new THREE.Vector2(this.width, this.height),
-                1.2,
-                0.2,
-                0.86,
+                0.88,
+                0.16,
+                0.96,
             );
             this.composer.addPass(this.filter);
         }
 
-        let ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
+        let ambientLight = new THREE.AmbientLight(0xffffff, 0.72);
         this.add(ambientLight);
 
-        let fillLight = new THREE.DirectionalLight(0x9ab8ff, 0.95);
+        let fillLight = new THREE.DirectionalLight(0x9ab8ff, 0.58);
         fillLight.position.set(-8, 10, 8);
         this.add(fillLight);
 
-        let rimLight = new THREE.DirectionalLight(0xffc0d8, 0.65);
+        let rimLight = new THREE.DirectionalLight(0xffc0d8, 0.4);
         rimLight.position.set(10, 7, 4);
         this.add(rimLight);
 
-        let starLight = new THREE.DirectionalLight(0xcbd8ff, 0.18);
+        let starLight = new THREE.DirectionalLight(0xcbd8ff, 0.12);
         starLight.position.set(0, 12, -16);
         this.add(starLight);
 
