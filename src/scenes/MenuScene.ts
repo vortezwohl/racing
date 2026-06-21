@@ -118,6 +118,7 @@ export default class MenuScene extends THREE.Scene {
         this.sounds = {
             "vehicle-select": new Audio("./assets/sounds/vehicle-select.wav")
         };
+        this.sounds["vehicle-select"].volume = 0.18;
         this.activate();
     }
 

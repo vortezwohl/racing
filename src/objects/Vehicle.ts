@@ -14,7 +14,26 @@ type VehicleControlInput = {
     throttle?: number;
 };
 
+type EngineWaveform = "sine" | "triangle" | "sawtooth" | "pulse";
+
+type EngineAudioListenerState = {
+    forward: THREE.Vector3;
+    position: THREE.Vector3;
+    right: THREE.Vector3;
+};
+
 export default class Vehicle {
+    static activeEngineAudioUsers: number = 0;
+    static engineWaveformUsage: Record<EngineWaveform, number> = {
+        pulse: 0,
+        sawtooth: 0,
+        sine: 0,
+        triangle: 0,
+    };
+    static sharedEngineAudioContext?: AudioContext;
+    static sharedPulseWave?: PeriodicWave;
+    static sharedPulseWaveContext?: AudioContext;
+
     acceleration: number;
     deceleration: number;
     friction: number;
@@ -57,6 +76,39 @@ export default class Vehicle {
     directionDebug?: DynamicDebugVector;
     normalDebug?: DynamicDebugVector;
     upDebug?: DynamicDebugVector;
+
+    engineAudioContext?: AudioContext;
+    engineAudioInitialized: boolean;
+    engineBaseGain: number;
+    engineBaseWaveform: EngineWaveform;
+    engineCutoffExponent: number;
+    engineDistanceReference: number;
+    engineFilter?: BiquadFilterNode;
+    engineFilterQ: number;
+    engineFilterSmoothing: number;
+    engineFrequencySmoothing: number;
+    engineFrontCutoffScale: number;
+    engineFrontGainScale: number;
+    engineHarmonicFrequencyRatio: number;
+    engineHarmonicGain?: GainNode;
+    engineHarmonicGainAmount: number;
+    engineHarmonicSound?: OscillatorNode;
+    engineIdleFrequency: number;
+    engineIdleGainScale: number;
+    engineIsLocalSource: boolean;
+    engineMaxCutoffFrequency: number;
+    engineMaxFrequency: number;
+    engineMinCutoffFrequency: number;
+    engineOutputGain?: GainNode;
+    enginePanScale: number;
+    engineRearCutoffScale: number;
+    engineRearGainScale: number;
+    engineReferenceAcceleration: number;
+    engineSound?: OscillatorNode;
+    engineSpeedExponent: number;
+    engineStereoPanner?: StereoPannerNode;
+    engineWaveformUsageReserved: boolean;
+    previousEngineSpeed: number;
 
     constructor(scene: THREE.Scene, vehicleData: VehicleData, 
         position: THREE.Vector3, direction: THREE.Vector3,
@@ -101,6 +153,361 @@ export default class Vehicle {
         this.laps = 1;
 
         this.sounds = {};
+        this.engineAudioInitialized = false;
+        this.engineBaseGain = 0.08;
+        this.engineBaseWaveform = "sine";
+        this.engineCutoffExponent = 1.1;
+        this.engineDistanceReference = 28;
+        this.engineFilterQ = 1.9;
+        this.engineFilterSmoothing = 0.05;
+        this.engineFrequencySmoothing = 0.045;
+        this.engineFrontCutoffScale = 1.04;
+        this.engineFrontGainScale = 1;
+        this.engineHarmonicFrequencyRatio = 2;
+        this.engineHarmonicGainAmount = 0.02;
+        this.engineIdleFrequency = 74;
+        this.engineIdleGainScale = 0.55;
+        this.engineIsLocalSource = false;
+        this.engineMaxCutoffFrequency = 2200;
+        this.engineMaxFrequency = 285;
+        this.engineMinCutoffFrequency = 320;
+        this.enginePanScale = 0.85;
+        this.engineRearCutoffScale = 0.68;
+        this.engineRearGainScale = 0.72;
+        this.engineReferenceAcceleration = Math.max(this.acceleration * 0.72, 0.0001);
+        this.engineSpeedExponent = 1.75;
+        this.engineWaveformUsageReserved = false;
+        this.previousEngineSpeed = 0;
+    }
+
+    static getSharedEngineAudioContext(): AudioContext {
+        if (!Vehicle.sharedEngineAudioContext ||
+            Vehicle.sharedEngineAudioContext.state === "closed") {
+            Vehicle.sharedEngineAudioContext = new AudioContext();
+            Vehicle.sharedPulseWave = undefined;
+            Vehicle.sharedPulseWaveContext = undefined;
+        }
+
+        return Vehicle.sharedEngineAudioContext;
+    }
+
+    static getSharedPulseWave(context: AudioContext): PeriodicWave {
+        if (!Vehicle.sharedPulseWave || Vehicle.sharedPulseWaveContext !== context) {
+            let harmonicCount = 32;
+            let real = new Float32Array(harmonicCount + 1);
+            let imag = new Float32Array(harmonicCount + 1);
+            let pulseWidth = 0.28;
+
+            for (let harmonic = 1; harmonic <= harmonicCount; harmonic++) {
+                let damping = Math.exp(-harmonic / 7);
+                imag[harmonic] = (2 / (harmonic * Math.PI)) *
+                    Math.sin(harmonic * Math.PI * pulseWidth) * damping;
+            }
+
+            Vehicle.sharedPulseWave = context.createPeriodicWave(real, imag);
+            Vehicle.sharedPulseWaveContext = context;
+        }
+
+        return Vehicle.sharedPulseWave;
+    }
+
+    static chooseDistributedEngineWaveform(
+        waveforms: ReadonlyArray<EngineWaveform>,
+    ): EngineWaveform {
+        let usageEntries = waveforms.map((waveform) => ({
+            count: Vehicle.engineWaveformUsage[waveform] || 0,
+            waveform,
+        }));
+        let minimumCount = Math.min(...usageEntries.map((entry) => entry.count));
+        let candidates = usageEntries
+            .filter((entry) => entry.count === minimumCount)
+            .map((entry) => entry.waveform);
+
+        return candidates[Math.floor(Math.random() * candidates.length)];
+    }
+
+    configureEngineAudio(options: {
+        baseGain?: number;
+        baseWaveform?: EngineWaveform;
+        harmonicGainAmount?: number;
+        isLocalSource?: boolean;
+    } = {}) {
+        let previousWaveform = this.engineBaseWaveform;
+        this.engineBaseGain = options.baseGain ?? this.engineBaseGain;
+        this.engineBaseWaveform = options.baseWaveform ?? this.engineBaseWaveform;
+        this.engineHarmonicGainAmount =
+            options.harmonicGainAmount ?? this.engineHarmonicGainAmount;
+        this.engineIsLocalSource = options.isLocalSource ?? this.engineIsLocalSource;
+
+        if (this.engineWaveformUsageReserved &&
+            previousWaveform !== this.engineBaseWaveform) {
+            Vehicle.engineWaveformUsage[previousWaveform] = Math.max(
+                Vehicle.engineWaveformUsage[previousWaveform] - 1,
+                0,
+            );
+            Vehicle.engineWaveformUsage[this.engineBaseWaveform] += 1;
+        }
+    }
+
+    reserveEngineWaveformUsage() {
+        if (this.engineWaveformUsageReserved)
+            return;
+
+        Vehicle.engineWaveformUsage[this.engineBaseWaveform] += 1;
+        this.engineWaveformUsageReserved = true;
+    }
+
+    releaseEngineWaveformUsage() {
+        if (!this.engineWaveformUsageReserved)
+            return;
+
+        Vehicle.engineWaveformUsage[this.engineBaseWaveform] = Math.max(
+            Vehicle.engineWaveformUsage[this.engineBaseWaveform] - 1,
+            0,
+        );
+        this.engineWaveformUsageReserved = false;
+    }
+
+    createEngineOscillator(
+        context: AudioContext,
+        waveform: EngineWaveform,
+    ): OscillatorNode {
+        let oscillator = context.createOscillator();
+        if (waveform === "pulse")
+            oscillator.setPeriodicWave(Vehicle.getSharedPulseWave(context));
+        else
+            oscillator.type = waveform;
+
+        return oscillator;
+    }
+
+    initializeEngineAudio() {
+        if (this.engineAudioInitialized)
+            return;
+
+        this.reserveEngineWaveformUsage();
+        this.engineAudioContext = Vehicle.getSharedEngineAudioContext();
+        Vehicle.activeEngineAudioUsers++;
+
+        // 所有载具共用控制模型，但保留每车独立的波形、总音量和声像节点
+        this.engineSound = this.createEngineOscillator(
+            this.engineAudioContext,
+            this.engineBaseWaveform,
+        );
+        this.engineHarmonicSound = this.engineAudioContext.createOscillator();
+        this.engineHarmonicGain = this.engineAudioContext.createGain();
+        this.engineFilter = this.engineAudioContext.createBiquadFilter();
+        this.engineOutputGain = this.engineAudioContext.createGain();
+        this.engineStereoPanner = this.engineAudioContext.createStereoPanner();
+        this.engineHarmonicSound.type = "sine";
+        this.engineHarmonicGain.gain.value = this.engineHarmonicGainAmount;
+        this.engineFilter.type = "lowpass";
+        this.engineFilter.frequency.value = this.engineMinCutoffFrequency;
+        this.engineFilter.Q.value = this.engineFilterQ;
+        this.engineOutputGain.gain.value = this.engineBaseGain;
+        this.engineStereoPanner.pan.value = 0;
+
+        this.engineSound.connect(this.engineFilter);
+        this.engineHarmonicSound.connect(this.engineHarmonicGain);
+        this.engineHarmonicGain.connect(this.engineFilter);
+        this.engineFilter.connect(this.engineOutputGain);
+        this.engineOutputGain.connect(this.engineStereoPanner);
+        this.engineStereoPanner.connect(this.engineAudioContext.destination);
+
+        this.engineSound.frequency.value = this.engineIdleFrequency;
+        this.engineHarmonicSound.frequency.value =
+            this.engineIdleFrequency * this.engineHarmonicFrequencyRatio;
+        this.engineSound.start();
+        this.engineHarmonicSound.start();
+        this.engineAudioInitialized = true;
+
+        if (this.engineAudioContext.state === "suspended")
+            void this.engineAudioContext.resume();
+    }
+
+    createEngineAudioListenerState(): EngineAudioListenerState {
+        let forward = new THREE.Vector3(this.direction.x, 0, this.direction.z);
+        if (forward.lengthSq() < 0.0001)
+            forward.set(0, 0, 1);
+        else
+            forward.normalize();
+
+        let right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0));
+        if (right.lengthSq() < 0.0001)
+            right.set(1, 0, 0);
+        else
+            right.normalize();
+
+        return {
+            forward,
+            position: this.position.clone(),
+            right,
+        };
+    }
+
+    getEngineSpatialMix(listenerState?: EngineAudioListenerState) {
+        if (!listenerState || this.engineIsLocalSource) {
+            return {
+                cutoffScale: 1,
+                gainScale: 1,
+                pan: 0,
+            };
+        }
+
+        let toVehicle = this.position.clone().sub(listenerState.position);
+        let distance = toVehicle.length();
+        let distanceGain = 1 / (1 + Math.pow(distance / this.engineDistanceReference, 1.1));
+
+        let planarDirection = new THREE.Vector3(toVehicle.x, 0, toVehicle.z);
+        if (planarDirection.lengthSq() < 0.0001) {
+            return {
+                cutoffScale: 1,
+                gainScale: distanceGain,
+                pan: 0,
+            };
+        }
+
+        planarDirection.normalize();
+        let frontFactor = THREE.MathUtils.clamp(
+            listenerState.forward.dot(planarDirection),
+            -1,
+            1,
+        );
+        let frontMix = (frontFactor + 1) * 0.5;
+        let gainScale = distanceGain * THREE.MathUtils.lerp(
+            this.engineRearGainScale,
+            this.engineFrontGainScale,
+            frontMix,
+        );
+        let cutoffScale = THREE.MathUtils.lerp(
+            this.engineRearCutoffScale,
+            this.engineFrontCutoffScale,
+            frontMix,
+        );
+        let pan = THREE.MathUtils.clamp(
+            listenerState.right.dot(planarDirection) * this.enginePanScale,
+            -1,
+            1,
+        );
+
+        return {
+            cutoffScale,
+            gainScale,
+            pan,
+        };
+    }
+
+    updateEngineAudio(dt: number, listenerState?: EngineAudioListenerState) {
+        if (!this.engineAudioInitialized || !this.engineAudioContext ||
+            !this.engineSound || !this.engineHarmonicSound || !this.engineFilter ||
+            !this.engineOutputGain || !this.engineStereoPanner)
+            return;
+
+        let currentSpeed = this.velocity.length();
+        let maxSpeed = Math.max(this.getEffectiveMaxSpeed(), 0.0001);
+        let speedRatio = THREE.MathUtils.clamp(currentSpeed / maxSpeed, 0, 1);
+        let speedCurve = Math.pow(speedRatio, this.engineSpeedExponent);
+        let idleGainBlend = THREE.MathUtils.lerp(
+            this.engineIdleGainScale,
+            1,
+            Math.pow(speedRatio, 0.65),
+        );
+        let targetFrequency = THREE.MathUtils.lerp(
+            this.engineIdleFrequency,
+            this.engineMaxFrequency,
+            speedCurve,
+        );
+
+        let positiveAcceleration = Math.max(currentSpeed - this.previousEngineSpeed, 0) /
+            Math.max(dt, 0.0001);
+        let accelerationRatio = THREE.MathUtils.clamp(
+            positiveAcceleration / this.engineReferenceAcceleration,
+            0,
+            1,
+        );
+        let cutoffCurve = Math.pow(accelerationRatio, this.engineCutoffExponent);
+        let spatialMix = this.getEngineSpatialMix(listenerState);
+        let targetCutoff = THREE.MathUtils.lerp(
+            this.engineMinCutoffFrequency,
+            this.engineMaxCutoffFrequency,
+            cutoffCurve,
+        ) * spatialMix.cutoffScale;
+
+        let now = this.engineAudioContext.currentTime;
+        this.engineSound.frequency.setTargetAtTime(
+            targetFrequency,
+            now,
+            this.engineFrequencySmoothing,
+        );
+        this.engineHarmonicSound.frequency.setTargetAtTime(
+            targetFrequency * this.engineHarmonicFrequencyRatio,
+            now,
+            this.engineFrequencySmoothing,
+        );
+        this.engineFilter.frequency.setTargetAtTime(
+            targetCutoff,
+            now,
+            this.engineFilterSmoothing,
+        );
+        this.engineFilter.Q.setTargetAtTime(
+            this.engineFilterQ,
+            now,
+            this.engineFilterSmoothing,
+        );
+        this.engineOutputGain.gain.setTargetAtTime(
+            this.engineBaseGain * spatialMix.gainScale * idleGainBlend,
+            now,
+            this.engineFilterSmoothing,
+        );
+        this.engineStereoPanner.pan.setTargetAtTime(
+            spatialMix.pan,
+            now,
+            this.engineFilterSmoothing,
+        );
+
+        this.previousEngineSpeed = currentSpeed;
+    }
+
+    disposeAudio() {
+        if (!this.engineAudioInitialized)
+            return;
+
+        try {
+            this.engineSound?.stop();
+            this.engineHarmonicSound?.stop();
+        } catch (_error) {
+            // repeated disposal may stop oscillators more than once
+        }
+
+        try {
+            this.engineSound?.disconnect();
+            this.engineHarmonicSound?.disconnect();
+            this.engineHarmonicGain?.disconnect();
+            this.engineFilter?.disconnect();
+            this.engineOutputGain?.disconnect();
+            this.engineStereoPanner?.disconnect();
+        } catch (_error) {
+            // repeated disposal may reach already disconnected nodes
+        }
+
+        this.engineAudioInitialized = false;
+        this.engineSound = undefined;
+        this.engineHarmonicSound = undefined;
+        this.engineHarmonicGain = undefined;
+        this.engineFilter = undefined;
+        this.engineOutputGain = undefined;
+        this.engineStereoPanner = undefined;
+        this.engineAudioContext = undefined;
+        this.releaseEngineWaveformUsage();
+
+        Vehicle.activeEngineAudioUsers = Math.max(Vehicle.activeEngineAudioUsers - 1, 0);
+        if (Vehicle.activeEngineAudioUsers === 0 && Vehicle.sharedEngineAudioContext &&
+            Vehicle.sharedEngineAudioContext.state !== "closed") {
+            void Vehicle.sharedEngineAudioContext.close();
+            Vehicle.sharedEngineAudioContext = undefined;
+            Vehicle.sharedPulseWave = undefined;
+            Vehicle.sharedPulseWaveContext = undefined;
+        }
     }
 
     loadGLTF(scene: THREE.Scene, data: GLTF) {
@@ -536,5 +943,7 @@ export default class Vehicle {
 }
 
 export {
+    EngineAudioListenerState,
+    EngineWaveform,
     VehicleControlInput,
 };

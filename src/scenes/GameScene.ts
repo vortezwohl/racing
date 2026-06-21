@@ -239,6 +239,8 @@ export default class GameScene extends THREE.Scene {
             "countdown": new Audio("./assets/sounds/countdown.wav"),
             "countdown-start": new Audio("./assets/sounds/countdown-start.wav")
         };
+        this.sounds["countdown"].volume = 0.2;
+        this.sounds["countdown-start"].volume = 0.24;
 
         this.resetUi();
     }
@@ -2001,6 +2003,8 @@ export default class GameScene extends THREE.Scene {
         let raceRunningMs = Math.max(0, this.countdown - 6000);
         let playerControls = this.finished ? {} : this.keysPressed;
         this.player.update(this.track, dt, playerControls);
+        let listenerState = this.player.createEngineAudioListenerState();
+        this.player.updateEngineAudio(dt, listenerState);
 
         for (let i = 0; i < this.npcs.length; i++) {
             let npc = this.npcs[i];
@@ -2011,6 +2015,7 @@ export default class GameScene extends THREE.Scene {
                 selfId: npcState?.id,
                 vehicleStates: this.raceVehicleStates,
             });
+            npc.updateEngineAudio(dt, listenerState);
         }
 
         this.recordPlayerTelemetry(dt);
@@ -2084,8 +2089,10 @@ export default class GameScene extends THREE.Scene {
 
         this.player?.clearPendingTimeouts();
         this.player?.disposeAudio?.();
-        for (let npc of this.npcs || [])
+        for (let npc of this.npcs || []) {
             npc.clearPendingTimeouts();
+            npc.disposeAudio?.();
+        }
         Object.values(this.sounds || {}).forEach((sound) => {
             sound.pause();
             sound.currentTime = 0;

@@ -7,11 +7,8 @@ import Vehicle from "./Vehicle";
 
 export default class Player extends Vehicle {
     camera: THREE.PerspectiveCamera;
-    engineAudioContext: AudioContext;
     manualCamera: boolean = false;
     orbitals?: OrbitControls;
-
-    engineSound: OscillatorNode;
 
     constructor(scene: THREE.Scene, camera: THREE.PerspectiveCamera,
         vehicleData: VehicleData, position: THREE.Vector3, direction: THREE.Vector3,
@@ -28,14 +25,17 @@ export default class Player extends Vehicle {
             "complete-race": new Audio("./assets/sounds/complete-race.wav"),
             "out-of-bounds": new Audio("./assets/sounds/out-of-bounds.wav")
         };
+        this.sounds["complete-lap"].volume = 0.12;
+        this.sounds["complete-race"].volume = 0.12;
+        this.sounds["out-of-bounds"].volume = 0.12;
 
-        // map engine sound frequency based on velocity
-        this.engineAudioContext = new AudioContext();
-        this.engineSound = this.engineAudioContext.createOscillator();
-        this.engineSound.type = "triangle";
-        this.engineSound.connect(this.engineAudioContext.destination);
-        this.engineSound.frequency.value = 0;
-        this.engineSound.start();
+        this.configureEngineAudio({
+            baseGain: 0.08,
+            baseWaveform: "sawtooth",
+            harmonicGainAmount: 0.08,
+            isLocalSource: true,
+        });
+        this.initializeEngineAudio();
     }
 
     handleCameraMovement(forward: boolean, follow: boolean = true) {
@@ -107,11 +107,6 @@ export default class Player extends Vehicle {
 
         this.applyControlInput({ brake, steer, throttle }, dt);
 
-        if (keysPressed["w"] || keysPressed["s"] || keysPressed["shift"])
-            this.engineSound.frequency.value = 50 + this.velocity.length() * 100;
-        else
-            this.engineSound.frequency.value *= 0.96;
-
         // reset roll
         if (!(keysPressed["a"] || keysPressed["d"]))
             this.rotation.z *= 0.8;            
@@ -128,19 +123,9 @@ export default class Player extends Vehicle {
         if (!this.model || !this.hitbox || !track || !dt)
             return;
         
-        this.handleInput(keysPressed, dt);        
+        this.handleInput(keysPressed, dt);
         super.update(track, dt);
         this.handleCameraMovement(!keysPressed["r"], this.isAlive);
         this.updateCameraFov();
-    }
-
-    disposeAudio() {
-        try {
-            this.engineSound.stop();
-        } catch (_error) {
-            // engineSound may already be stopped during repeated disposal
-        }
-
-        void this.engineAudioContext.close();
     }
 }
