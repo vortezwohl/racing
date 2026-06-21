@@ -21,6 +21,7 @@ const clamp = (value: number, min: number, max: number): number =>
     Math.max(min, Math.min(max, value));
 const branchEntryLookAheadDistance = 24;
 const branchEntryCommitDistance = 72;
+const parallelSplitEntryCommitDistance = 120;
 const professionalRecoveryThreshold = 0.72;
 const professionalRecoveryFullThreshold = 0.92;
 
@@ -34,6 +35,12 @@ type ControlCandidate = {
     score: number;
     steer: number;
     throttle: number;
+};
+
+type BranchTransitionProfile = {
+    distanceToBranch?: number;
+    isParallelSplit: boolean;
+    lateralDelta: number;
 };
 
 const isApproachingCommittedBranch = (
@@ -233,11 +240,18 @@ const getCommittedBranchLaneTarget = (
     routeState: NpcRouteState,
     projection: EdgeProjection | undefined,
     currentSample: TrackGraphEdgeSample | undefined,
-): number | undefined => {
+): {
+    laneTarget?: number;
+    profile: BranchTransitionProfile;
+} => {
+    let defaultProfile: BranchTransitionProfile = {
+        isParallelSplit: false,
+        lateralDelta: 0,
+    };
     if (!projection || !currentSample || !routeState.committedBranchEdgeId)
-        return undefined;
+        return { profile: defaultProfile };
     if (projection.edgeId === routeState.committedBranchEdgeId)
-        return undefined;
+        return { profile: defaultProfile };
 
     let distanceToBranch = getDistanceToRouteEdgeStart(
         graph,
@@ -245,16 +259,13 @@ const getCommittedBranchLaneTarget = (
         projection,
         routeState.committedBranchEdgeId,
     );
-    if (distanceToBranch === undefined || distanceToBranch > branchEntryCommitDistance)
-        return undefined;
-
     let branchEdge = getEdge(graph, routeState.committedBranchEdgeId);
     let branchSample = branchEdge?.samples[Math.min(
         3,
         Math.max((branchEdge?.samples.length || 1) - 1, 0),
     )];
     if (!branchSample)
-        return undefined;
+        return { profile: defaultProfile };
 
     let branchOffsetDelta = dotNpc(
         {
@@ -264,12 +275,38 @@ const getCommittedBranchLaneTarget = (
         },
         currentSample.lateral,
     );
-    let branchBias = clamp(1 - distanceToBranch / branchEntryCommitDistance, 0, 1);
-    return clamp(
-        projection.lateralOffset + branchOffsetDelta * (0.18 + branchBias * 0.32),
-        -currentSample.corridorHalfWidth * 0.58,
-        currentSample.corridorHalfWidth * 0.58,
+    let branchHeadingDot = clamp(
+        dotNpc(currentSample.tangent, branchSample.tangent),
+        -1,
+        1,
     );
+    let branchHeadingDelta = Math.acos(branchHeadingDot);
+    let isParallelSplit = branchHeadingDelta <= 0.12 &&
+        (branchSample.segmentType === "straight" || branchSample.segmentType === "sweeper");
+    let entryDistance = isParallelSplit ?
+        parallelSplitEntryCommitDistance :
+        branchEntryCommitDistance;
+    let profile: BranchTransitionProfile = {
+        distanceToBranch,
+        isParallelSplit,
+        lateralDelta: branchOffsetDelta,
+    };
+    if (distanceToBranch === undefined || distanceToBranch > entryDistance)
+        return { profile };
+
+    let branchBias = clamp(1 - distanceToBranch / entryDistance, 0, 1);
+    let branchBlend = isParallelSplit ?
+        (0.08 + branchBias * 0.28) :
+        (0.18 + branchBias * 0.32);
+    let branchClampScale = isParallelSplit ? 0.42 : 0.58;
+    return {
+        laneTarget: clamp(
+            projection.lateralOffset + branchOffsetDelta * branchBlend,
+            -currentSample.corridorHalfWidth * branchClampScale,
+            currentSample.corridorHalfWidth * branchClampScale,
+        ),
+        profile,
+    };
 };
 
 const scoreCandidate = (
@@ -295,14 +332,18 @@ const buildControlCandidates = (
     let corridorHalfWidth = currentSample.corridorHalfWidth;
     let branchEntryPhase = isApproachingCommittedBranch(routeState, projection);
     let connectorEntryPhase = isApproachingCommittedConnector(routeState, projection);
-    let branchLaneTarget = getCommittedBranchLaneTarget(
+    let branchTransition = getCommittedBranchLaneTarget(
         graph,
         routeState,
         projection,
         currentSample,
     );
+    let branchLaneTarget = branchTransition.laneTarget;
+    let parallelSplitEntry = branchEntryPhase && branchTransition.profile.isParallelSplit;
     let routeLookAheadDistance = connectorEntryPhase ?
         28 :
+        parallelSplitEntry ?
+            18 :
         branchEntryPhase ?
             branchEntryLookAheadDistance :
             22;
@@ -348,6 +389,8 @@ const buildControlCandidates = (
         let laneError = desiredOffset - projection.lateralOffset;
         let entryGain = connectorEntryPhase ?
             0.26 :
+            parallelSplitEntry ?
+                0.16 :
             branchEntryPhase ?
                 0.3 :
                 0.34;
@@ -355,8 +398,14 @@ const buildControlCandidates = (
             -projection.lateralOffset * 0.22 :
             0;
         let curveFeedForward = (currentSample.signedCurvature || 0) *
-            (connectorEntryPhase ? 2.2 : branchEntryPhase ? 2.1 : 3.6);
-        let steerLimit = connectorEntryPhase ? 0.42 : branchEntryPhase ? 0.44 : 0.92;
+            (connectorEntryPhase ? 2.2 : parallelSplitEntry ? 0.8 : branchEntryPhase ? 2.1 : 3.6);
+        let steerLimit = connectorEntryPhase ?
+            0.42 :
+            parallelSplitEntry ?
+                0.26 :
+            branchEntryPhase ?
+                0.44 :
+                0.92;
         let steer = clamp(
             laneError * entryGain + centerRecovery + curveFeedForward,
             -steerLimit,
@@ -386,7 +435,7 @@ const buildControlCandidates = (
         let brake = clamp(
             Math.max(0, -speedGap) * 2.6 +
             (connectorEntryPhase ? 0.08 : 0) +
-            (branchEntryPhase ? clamp(
+            (branchEntryPhase && !parallelSplitEntry ? clamp(
                 Math.abs(laneError) / Math.max(corridorHalfWidth * 0.9, 0.001),
                 0,
                 1,
@@ -468,8 +517,18 @@ const planControl = (
     let throttle = isLaunch ? 1 : Math.max(config.start.minThrottle, 0.58);
     let brake = 0;
     let steer = 0;
+    let branchTransitionProfile: BranchTransitionProfile = {
+        isParallelSplit: false,
+        lateralDelta: 0,
+    };
 
     if (currentSample && projection) {
+        branchTransitionProfile = getCommittedBranchLaneTarget(
+            graph,
+            routeState,
+            projection,
+            currentSample,
+        ).profile;
         let candidates = buildControlCandidates(
             graph,
             vehicle,
@@ -501,11 +560,16 @@ const planControl = (
         }
 
         if (branchEntryPhase) {
-            throttle = Math.min(throttle, 0.72 - cornerPressure * 0.12);
-            brake = Math.max(
-                brake,
-                0.08 + Math.max(0, lateralUsage - 0.48) * 0.18,
-            );
+            if (branchTransitionProfile.isParallelSplit) {
+                if (overSpeedPressure < 0.2 && lateralUsage < 0.7)
+                    throttle = Math.max(throttle, 0.86);
+            } else {
+                throttle = Math.min(throttle, 0.72 - cornerPressure * 0.12);
+                brake = Math.max(
+                    brake,
+                    0.08 + Math.max(0, lateralUsage - 0.48) * 0.18,
+                );
+            }
         }
 
         if (
@@ -547,7 +611,12 @@ const planControl = (
         }
     }
 
-    if (isOnCommittedBranch && projection && edge) {
+    if (
+        isOnCommittedBranch &&
+        projection &&
+        edge &&
+        !branchTransitionProfile.isParallelSplit
+    ) {
         let branchProgress = projection.distanceOnEdge / Math.max(edge.length, 0.001);
         if (branchProgress < 0.42) {
             let branchSafetySpeed = 0.46 + (0.58 - 0.46) * (branchProgress / 0.42);

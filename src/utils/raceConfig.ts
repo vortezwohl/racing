@@ -151,7 +151,7 @@ const raceNpc = {
             trafficHz: 30,
         },
         routing: {
-            branchCommitDistance: 64,
+            branchCommitDistance: 96,
             targetLookAheadDistance: 40,
         },
         start: {

@@ -419,9 +419,20 @@ export default class NPC extends Vehicle {
             corridorUsage <= 1.55 &&
             altitudeGap <= 18
         );
+        let isBranchApproachLocked = !!(
+            this.graphRouteState?.committedBranchEdgeId &&
+            corridorReference.projection &&
+            corridorReference.projection.edgeId !== this.graphRouteState.committedBranchEdgeId &&
+            this.graphRouteState.route.edgeIds.includes(this.graphRouteState.committedBranchEdgeId) &&
+            corridorUsage <= 0.96 &&
+            altitudeGap <= 4
+        );
+        let branchApproachRecoveryShield = isBranchApproachLocked && currentSpeed < 0.28;
         let isBadlyStalled = corridorUsage > 0.78 && currentSpeed < 0.12;
         let isSeverelyOffTrack = corridorUsage > 1.18 ||
             altitudeGap > 5.5 && !hasRecoverableTrackDrift;
+        if (branchApproachRecoveryShield)
+            isBadlyStalled = false;
         this.lowSpeedRecoveryMs = isBadlyStalled ?
             this.lowSpeedRecoveryMs + dt :
             0;
@@ -454,7 +465,7 @@ export default class NPC extends Vehicle {
         }
 
         let control = this.buildRaceLineControl(track, dt, context);
-        if (corridorUsage > 0.9) {
+        if (corridorUsage > 0.9 && !isBranchApproachLocked) {
             let targetDirection = corridorReference.targetPoint.clone()
                 .sub(this.position.clone());
             if (targetDirection.lengthSq() > 0.0001) {
@@ -491,6 +502,12 @@ export default class NPC extends Vehicle {
                 0.34 + Math.max(0, corridorUsage - 0.9) * 0.8,
             );
             control.brakeScale = Math.max(control.brakeScale, 1.08);
+        }
+        if (branchApproachRecoveryShield) {
+            control.throttle = Math.max(control.throttle, 0.52);
+            control.brake = Math.min(control.brake, 0.12);
+            control.brakeScale = Math.min(control.brakeScale, 1);
+            control.steerScale = Math.min(control.steerScale, 1.08);
         }
         let accelerationScale = (context?.raceRunningMs || 0) < raceNpc.startBoostDurationMs ?
             raceNpc.startBoostScale :

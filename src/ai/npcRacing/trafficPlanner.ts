@@ -227,26 +227,72 @@ const getDistanceToEdgeEnd = (
     return Math.max(edge.length - projection.distanceOnEdge, 0);
 };
 
-const isApproachingBranchDecision = (
+const getUpcomingBranchProfile = (
     graph: TrackGraph,
     routeState: NpcRouteState,
-): boolean => {
+    config: NpcPlanningConfig,
+): {
+    approaching: boolean;
+    isParallelSplit: boolean;
+} => {
     let projection = routeState.projection;
     if (!projection)
-        return false;
+        return {
+            approaching: false,
+            isParallelSplit: false,
+        };
     if (routeState.committedBranchEdgeId)
-        return false;
+        return {
+            approaching: false,
+            isParallelSplit: false,
+        };
 
     let edge = getEdge(graph, projection.edgeId);
     let endNode = edge ? getNode(graph, edge.endNodeId) : undefined;
     let distanceToEdgeEnd = getDistanceToEdgeEnd(graph, projection);
+    let branchEdges = (endNode?.edgeIdsOut || [])
+        .map((edgeId) => getEdge(graph, edgeId))
+        .filter((candidate): candidate is NonNullable<typeof candidate> => !!candidate);
+    let isParallelSplit = false;
 
-    return !!(
+    for (let i = 0; i < branchEdges.length; i++) {
+        for (let j = i + 1; j < branchEdges.length; j++) {
+            let firstSample = branchEdges[i].samples[0];
+            let secondSample = branchEdges[j].samples[0];
+            if (!firstSample || !secondSample)
+                continue;
+
+            let headingDelta = Math.acos(clamp(
+                dotNpc(firstSample.tangent, secondSample.tangent),
+                -1,
+                1,
+            ));
+            if (
+                headingDelta <= 0.12 &&
+                firstSample.segmentType === "straight" &&
+                secondSample.segmentType === "straight"
+            ) {
+                isParallelSplit = true;
+                break;
+            }
+        }
+        if (isParallelSplit)
+            break;
+    }
+
+    let approachDistance = isParallelSplit ?
+        Math.max(config.routing.branchCommitDistance + 12, 72) :
+        44;
+
+    return {
+        approaching: !!(
         endNode &&
         endNode.edgeIdsOut.length > 1 &&
         distanceToEdgeEnd !== undefined &&
-        distanceToEdgeEnd <= 44
-    );
+        distanceToEdgeEnd <= approachDistance
+        ),
+        isParallelSplit,
+    };
 };
 
 const isStabilizingAfterBranchCommit = (
@@ -296,8 +342,19 @@ const planTrafficIntent = (
     let corridorHalfWidth = getProjectionCorridorHalfWidth(graph, projection);
     let safeLaneLimit = corridorHalfWidth * (brakeReachable ? 0.78 : 0.5);
     let sideThreat = traffic.sideBySide[0];
-    let approachingBranchDecision = isApproachingBranchDecision(graph, routeState);
+    let branchProfile = getUpcomingBranchProfile(graph, routeState, config);
+    let approachingBranchDecision = branchProfile.approaching;
     let branchStabilizing = isStabilizingAfterBranchCommit(graph, routeState);
+
+    if (branchProfile.isParallelSplit && approachingBranchDecision) {
+        return {
+            mode: snapshot.raceRunningMs < config.start.fullThrottleMs ?
+                "launch" :
+                "neutral",
+            reason: "parallel-branch-stabilize",
+            targetEdgeId: routeState.activeEdgeId,
+        };
+    }
 
     if (Math.abs(projection.lateralOffset) > corridorHalfWidth * 0.86) {
         return {

@@ -400,6 +400,7 @@ const scoreRouteCandidate = (
     let connectorBonus = candidate.connectorId ? 0.06 : 0;
     let alignmentPenalty = 0;
     let branchSidePenalty = 0;
+    let branchLanePreferenceBonus = 0;
     let firstEdges = candidate.edgeIds.slice(0, 4);
 
     for (let edgeId of firstEdges) {
@@ -464,6 +465,17 @@ const scoreRouteCandidate = (
                 branchSidePenalty =
                     clamp(offsetMismatch * 0.03, 0, 0.42) +
                     wrongSidePenalty;
+                let branchOffsetSign = Math.sign(expectedBranchOffset);
+                let currentOffsetSign = Math.sign(projection.lateralOffset);
+                let hasMeaningfulOffsets = Math.abs(expectedBranchOffset) > 0.8 ||
+                    Math.abs(projection.lateralOffset) > 0.8;
+                if (hasMeaningfulOffsets) {
+                    if (branchOffsetSign !== 0 && branchOffsetSign === currentOffsetSign) {
+                        branchLanePreferenceBonus = 0.2;
+                    } else if (branchOffsetSign !== 0 && currentOffsetSign !== 0) {
+                        branchLanePreferenceBonus = -0.12;
+                    }
+                }
             }
         }
     }
@@ -472,7 +484,7 @@ const scoreRouteCandidate = (
         ...candidate,
         score: -candidate.length * 0.0002 - curvatureCost * 0.18 -
             trafficCost - alignmentPenalty - branchSidePenalty +
-            branchBonus * 0.25 + connectorBonus,
+            branchBonus * 0.25 + connectorBonus + branchLanePreferenceBonus,
     };
 };
 

@@ -205,7 +205,9 @@ class AppShell {
 
     animate(timestamp?: number) {
         let safeTimestamp = timestamp ?? this.currentTime;
-        let dt = safeTimestamp - this.currentTime;
+        let dt = 0;
+        if (this.currentTime > 0)
+            dt = Math.min(Math.max(safeTimestamp - this.currentTime, 0), 33.34);
         this.currentTime = safeTimestamp;
 
         if (this.currentScene) {
